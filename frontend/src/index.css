@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-ink-950 text-slate-200 font-sans antialiased;
+    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.035) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+  ::selection {
+    @apply bg-gold-500/30 text-white;
+  }
+  h1, h2, h3 {
+    @apply font-display;
+  }
+  *:focus-visible {
+    outline: 2px solid #E8C077;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .zp-card {
+    @apply bg-ink-800/80 border border-ink-600 rounded-2xl backdrop-blur-sm;
+  }
+  .zp-input {
+    @apply w-full bg-ink-900 border border-ink-600 rounded-lg px-4 py-3 text-slate-100
+           placeholder:text-slate-500 focus:border-gold-500 focus:ring-1 focus:ring-gold-500
+           outline-none transition-colors;
+  }
+  .zp-label {
+    @apply block text-xs uppercase tracking-wider text-slate-400 mb-1.5 font-medium;
+  }
+  .zp-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 bg-gold-500 hover:bg-gold-400
+           text-ink-950 font-semibold rounded-lg px-5 py-3 transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .zp-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 bg-ink-700 hover:bg-ink-600
+           text-slate-100 font-medium rounded-lg px-5 py-3 border border-ink-600 transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .zp-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 text-slate-300 hover:text-white
+           font-medium px-4 py-2 transition-colors;
+  }
+  .zp-amount {
+    @apply font-mono tabular-nums;
+  }
+  .zp-pill {
+    @apply text-xs font-medium px-2.5 py-1 rounded-full border;
+  }
+  .zp-perforation {
+    background-image: radial-gradient(circle, #070A10 3px, transparent 3px);
+    background-size: 14px 14px;
+    background-position: -3px center;
+  }
+}

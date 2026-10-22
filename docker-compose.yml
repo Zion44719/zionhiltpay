@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: zionhiltpay-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zionhilt
+      POSTGRES_PASSWORD: zionhilt
+      POSTGRES_DB: zionhiltpay
+    volumes:
+      - zionhiltpay_pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zionhilt -d zionhiltpay"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: zionhiltpay-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://zionhilt:zionhilt@db:5432/zionhiltpay
+      SYNC_DATABASE_URL: postgresql+psycopg2://zionhilt:zionhilt@db:5432/zionhiltpay
+      CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000","http://localhost"]'
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    container_name: zionhiltpay-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  zionhiltpay_pgdata:

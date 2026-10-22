@@ -1,0 +1,5 @@
+# Extra packages needed only to RUN THE TESTS (install on top of requirements.txt):
+#   python -m pip install -r requirements.txt -r requirements-dev.txt
+pytest>=9.0
+pytest-asyncio>=1.4
+aiosmtpd>=1.4.6
