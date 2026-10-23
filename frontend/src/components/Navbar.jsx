@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
+import { Avatar } from './UI.jsx'
 
 const desktopLink = ({ isActive }) =>
   `px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -12,15 +13,18 @@ const mobileLink = ({ isActive }) =>
     isActive ? 'bg-ink-700 text-gold-400' : 'text-slate-200 hover:bg-ink-800'
   }`
 
+// [path, label, exact match, shown in the desktop bar]. Everything is in the phone menu.
 const LINKS = [
-  ['/dashboard', 'Dashboard', true],
-  ['/transfer', 'Send money'],
-  ['/deposit', 'Fund wallet'],
-  ['/withdraw', 'Withdraw'],
-  ['/devices', 'Devices & insurance'],
-  ['/transactions', 'History'],
-  ['/insights', 'Insights'],
-  ['/assistant', 'Assistant'],
+  ['/dashboard', 'Dashboard', true, true],
+  ['/transfer', 'Send money', false, true],
+  ['/send-to-bank', 'Send to bank', false, true],
+  ['/deposit', 'Fund wallet', false, true],
+  ['/loans', 'Loans', false, true],
+  ['/transactions', 'History', false, true],
+  ['/settings', 'Settings', false, true],
+  ['/devices', 'Devices & insurance', false, false],
+  ['/insights', 'Insights', false, false],
+  ['/assistant', 'Assistant', false, false],
 ]
 
 export default function Navbar() {
@@ -48,15 +52,15 @@ export default function Navbar() {
   return (
     <header className="border-b border-ink-700 bg-ink-950/90 backdrop-blur sticky top-0 z-40">
       <div className="max-w-6xl mx-auto px-3 min-[360px]:px-4 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-3">
-        <Link to="/" className="flex items-center gap-2 shrink-0">
+        <Link to={isAuthenticated ? '/dashboard' : '/'} className="flex items-center gap-2 shrink-0" aria-label={isAuthenticated ? 'ZionhiltPay, go to your dashboard' : 'ZionhiltPay home'}>
           <span className="w-8 h-8 rounded-lg bg-gold-500 text-ink-950 font-display font-bold flex items-center justify-center">Z</span>
           <span className="font-display text-base sm:text-lg text-white tracking-tight">ZionhiltPay</span>
         </Link>
 
         {isAuthenticated && (
           <nav className="hidden xl:flex items-center gap-1" aria-label="Main">
-            {LINKS.map(([to, label, end]) => (
-              <NavLink key={to} to={to} end={end} className={desktopLink}>{label.replace(' & insurance', '')}</NavLink>
+            {LINKS.filter((l) => l[3]).map(([to, label, end]) => (
+              <NavLink key={to} to={to} end={end} className={desktopLink}>{label}</NavLink>
             ))}
             {isAdmin && <NavLink to="/admin" className={desktopLink}>Admin</NavLink>}
           </nav>
@@ -65,9 +69,12 @@ export default function Navbar() {
         <div className="flex items-center gap-2 sm:gap-3">
           {isAuthenticated ? (
             <>
-              <span className="hidden sm:block text-sm text-slate-400 truncate max-w-[10rem]">
-                {profile?.username ? `@${profile.username}` : profile?.full_name?.split(' ')[0] || '…'}
-              </span>
+              <Link to="/settings" className="flex items-center gap-2 min-w-0" aria-label="Settings and profile">
+                <Avatar name={profile?.full_name} has={profile?.has_photo} size={36} />
+                <span className="hidden sm:block text-sm text-slate-400 truncate max-w-[9rem]">
+                  {profile?.username ? `@${profile.username}` : profile?.full_name?.split(' ')[0] || '…'}
+                </span>
+              </Link>
               <button onClick={handleLogout} className="hidden xl:inline-flex zp-btn-secondary !px-4 !py-2 text-sm">Log out</button>
               <button
                 type="button"

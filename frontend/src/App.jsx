@@ -14,6 +14,11 @@ import Deposit from './pages/Deposit.jsx'
 import Withdraw from './pages/Withdraw.jsx'
 import Transactions from './pages/Transactions.jsx'
 import Devices from './pages/Devices.jsx'
+import Settings from './pages/Settings.jsx'
+import Profile from './pages/Profile.jsx'
+import AccountLevel from './pages/AccountLevel.jsx'
+import Loans from './pages/Loans.jsx'
+import SendToBank from './pages/SendToBank.jsx'
 import Assistant from './pages/Assistant.jsx'
 import Insights from './pages/Insights.jsx'
 import NotFound from './pages/NotFound.jsx'
@@ -23,6 +28,9 @@ import AdminOverview from './pages/admin/AdminOverview.jsx'
 import AdminUsers from './pages/admin/AdminUsers.jsx'
 import AdminTransactions from './pages/admin/AdminTransactions.jsx'
 import AdminAudit from './pages/admin/AdminAudit.jsx'
+import AdminTier from './pages/admin/AdminTier.jsx'
+import AdminLoans from './pages/admin/AdminLoans.jsx'
+import AdminPartners from './pages/admin/AdminPartners.jsx'
 import AdminFraud from './pages/admin/AdminFraud.jsx'
 import AdminClaims from './pages/admin/AdminClaims.jsx'
 import AdminConfig from './pages/admin/AdminConfig.jsx'
@@ -46,6 +54,11 @@ export default function App() {
           <Route path="/withdraw" element={<ProtectedRoute><Withdraw /></ProtectedRoute>} />
           <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
           <Route path="/devices" element={<ProtectedRoute><Devices /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/settings/level" element={<ProtectedRoute><AccountLevel /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+          <Route path="/loans" element={<ProtectedRoute><Loans /></ProtectedRoute>} />
+          <Route path="/send-to-bank" element={<ProtectedRoute><SendToBank /></ProtectedRoute>} />
           <Route path="/assistant" element={<ProtectedRoute><Assistant /></ProtectedRoute>} />
           <Route path="/insights" element={<ProtectedRoute><Insights /></ProtectedRoute>} />
 
@@ -54,6 +67,9 @@ export default function App() {
             <Route path="users" element={<AdminUsers />} />
             <Route path="transactions" element={<AdminTransactions />} />
             <Route path="audit" element={<AdminAudit />} />
+            <Route path="tier" element={<AdminTier />} />
+            <Route path="loans" element={<AdminLoans />} />
+            <Route path="partners" element={<AdminPartners />} />
             <Route path="fraud" element={<AdminFraud />} />
             <Route path="claims" element={<AdminClaims />} />
             <Route path="copilot" element={<AdminCopilot />} />

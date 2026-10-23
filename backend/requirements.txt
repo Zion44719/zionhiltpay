@@ -17,3 +17,4 @@ slowapi==0.1.9
 httpx==0.27.2
 aiosmtplib==3.0.2
 tenacity==9.0.0
+Pillow>=11.0

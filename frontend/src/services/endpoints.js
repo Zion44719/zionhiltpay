@@ -1,4 +1,7 @@
-import { api } from './api'
+import { api, API_BASE_URL } from './api'
+
+// The shared client sends JSON by default, which would break file uploads: this lets axios/the browser add the multipart boundary.
+const MULTIPART = { headers: { 'Content-Type': 'multipart/form-data' } }
 
 export const authApi = {
   register: (payload) => api.post('/api/auth/register', payload),
@@ -30,7 +33,50 @@ export const deviceApi = {
   myClaims: () => api.get('/api/devices/claims/mine'),
 }
 
+export const profileApi = {
+  get: () => api.get('/api/profile'),
+  uploadPhoto: (file) => { const f = new FormData(); f.append('file', file); return api.post('/api/profile/photo', f, MULTIPART) },
+  deletePhoto: () => api.delete('/api/profile/photo'),
+  photo: () => api.get('/api/profile/photo', { responseType: 'blob' }),
+}
+
+export const tierApi = {
+  overview: () => api.get('/api/tier'),
+  upgrade: (formData) => api.post('/api/tier/upgrade', formData, MULTIPART),
+}
+
+export const bankApi = {
+  list: () => api.get('/api/banks'),
+  suggest: (account_number) => api.get('/api/banks/suggest', { params: { account_number } }),
+  resolve: (bank_code, account_number) => api.get('/api/banks/resolve', { params: { bank_code, account_number } }),
+  transfer: (payload) => api.post('/api/banks/transfer', payload),
+}
+
+export const loanApi = {
+  offer: () => api.get('/api/loans/offer'),
+  quote: (amount, tenor_days) => api.post('/api/loans/quote', { amount, tenor_days }),
+  apply: (payload) => api.post('/api/loans/apply', payload),
+  list: () => api.get('/api/loans'),
+  repay: (id, amount, pin) => api.post(`/api/loans/${id}/repay`, { amount, pin }),
+}
+
+export const partnersApi = {
+  list: () => api.get('/api/partners'),                       // public: the landing page needs no login
+  logoUrl: (p) => `${API_BASE_URL}/api/partners/${p.id}/logo?v=${p.version}`,
+}
+
 export const adminApi = {
+  partners: () => api.get('/api/admin/partners'),
+  partnerLogo: (id) => api.get(`/api/admin/partners/${id}/logo`, { responseType: 'blob' }),
+  createPartner: (formData) => api.post('/api/admin/partners', formData, MULTIPART),
+  updatePartner: (id, formData) => api.patch(`/api/admin/partners/${id}`, formData, MULTIPART),
+  deletePartner: (id) => api.delete(`/api/admin/partners/${id}`),
+  tierRequests: (status) => api.get('/api/admin/tier-requests', { params: { status } }),
+  decideTier: (id, decision, note) => api.post(`/api/admin/tier-requests/${id}/decision`, { decision, note }),
+  tierDocument: (id) => api.get(`/api/admin/tier-requests/${id}/document`, { responseType: 'blob' }),
+  revealBvn: (id) => api.post(`/api/admin/tier-requests/${id}/reveal-bvn`),
+  loans: (params) => api.get('/api/admin/loans', { params }),
+  userPhoto: (id) => api.get(`/api/admin/users/${id}/photo`, { responseType: 'blob' }),
   users: (params) => api.get('/api/admin/users', { params }),
   reviewKyc: (id, decision, note) => api.post(`/api/admin/users/${id}/kyc`, { decision, note }),
   revealId: (id) => api.post(`/api/admin/users/${id}/kyc/reveal`),

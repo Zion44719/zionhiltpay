@@ -21,13 +21,15 @@ from app.models.user import User, UserRole, OTPChannel
 from app.models.account import AccountType
 from app.services.ledger import get_or_create_account
 from app.core import identity as idt
-from app.core.migrations import upgrade_schema
+from app.core.migrations import upgrade_schema, seed_platform_accounts
 
 
 async def main(email: str, password: str, name: str, phone: str, username: str, super_admin: bool):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await upgrade_schema(conn)
+    async with engine.begin() as conn:
+        await seed_platform_accounts(conn)
 
     async with AsyncSessionLocal() as db:
         existing = await db.execute(select(User).where(User.email == email.strip().lower()))
@@ -50,6 +52,7 @@ async def main(email: str, password: str, name: str, phone: str, username: str, 
             account_number=idt.generate_account_number(),
             kyc_status="verified",
             kyc_level=2,
+            account_tier=3,
             email=email.strip().lower(),
             phone_number=norm_phone,
             password_hash=hash_password(password),

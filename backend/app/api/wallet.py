@@ -24,6 +24,8 @@ from app.core import identity as idt
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.services.directory import find_user
+from app.services.limits import enforce_outgoing, enforce_own_balance_room, room_for
+from app.services.payouts import perform_bank_payout
 
 router = APIRouter(prefix="/api/wallet", tags=["wallet"])
 
@@ -92,23 +94,20 @@ async def get_balance(db: AsyncSession = Depends(get_db), user: User = Depends(g
 @router.post("/deposit", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
 async def deposit(request: Request, payload: DepositRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     """Simulates funding the wallet from an external bank/card via the mock gateway.
-    No PIN required (inbound funds), mirroring most real fintech UX."""
+    No PIN required (inbound funds), mirroring most real fintech UX. Respects the tier's maximum balance."""
     amount = q2(payload.amount)
+    wallet = await get_or_create_account(db, AccountType.user_wallet, user.id)
+    ledger = LedgerService(db)
+    await ledger.lock(wallet)
+    await db.refresh(wallet)
+    enforce_own_balance_room(user.account_tier, Decimal(str(wallet.balance)), amount)
 
     gw_result = await payment_gateway.initiate_deposit(float(amount), user_reference=str(user.id))
-
-    ledger = LedgerService(db)
     txn = await ledger.start_transaction(
-        type=TransactionType.deposit,
-        initiator_user_id=user.id,
-        amount=amount,
-        currency="NGN",
-        narration=payload.narration or "Wallet funding",
-        gateway_reference=gw_result.gateway_reference,
-        ip_address=get_client_ip(request),
-        metadata={"gateway_message": gw_result.message},
+        type=TransactionType.deposit, initiator_user_id=user.id, amount=amount, currency="NGN",
+        narration=payload.narration or "Wallet funding", gateway_reference=gw_result.gateway_reference,
+        ip_address=get_client_ip(request), metadata={"gateway_message": gw_result.message},
     )
-
     if not gw_result.success:
         await ledger.fail(txn, reason=gw_result.message)
         await log_action(db, "DEPOSIT_FAILED", actor_user_id=str(user.id), actor_role=user.role,
@@ -117,12 +116,10 @@ async def deposit(request: Request, payload: DepositRequest, db: AsyncSession = 
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, gw_result.message)
 
     external = await get_or_create_account(db, AccountType.external_gateway)
-    wallet = await get_or_create_account(db, AccountType.user_wallet, user.id)
-
+    await ledger.lock(external)
     await ledger.post(txn, external, "D", amount)
     await ledger.post(txn, wallet, "C", amount)
     await ledger.finalize(txn)
-
     await log_action(db, "DEPOSIT_COMPLETED", actor_user_id=str(user.id), actor_role=user.role,
                       entity_type="transaction", entity_id=str(txn.id), ip_address=get_client_ip(request),
                       details={"amount": float(amount)})
@@ -132,19 +129,15 @@ async def deposit(request: Request, payload: DepositRequest, db: AsyncSession = 
 
 @router.post("/transfer", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
 async def transfer(request: Request, payload: TransferRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    """Wallet-to-wallet transfer. Every transfer:
-      1. Deducts amount + fee from sender's wallet
-      2. Credits amount to recipient's wallet
-      3. Splits the fee: reward -> sender's reward wallet, insurance -> sender's
-         device-insurance pool, remainder -> platform revenue.
-    """
+    """Wallet-to-wallet transfer. Deducts amount + fee from the sender, credits the recipient, and splits
+    the fee into the sender's cashback, device-insurance pool and platform revenue. Enforces the sender's
+    daily tier limit and the recipient's maximum balance."""
     _require_pin_ok(user, payload.pin)
     amount = q2(payload.amount)
 
     kind, recipient = await find_user(db, payload.recipient_identifier)
     if kind == "unknown":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "Enter a valid account number, username, email or phone number")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Enter a valid account number, username, email or phone number")
     if recipient is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Recipient not found")
     if recipient.id == user.id:
@@ -154,33 +147,31 @@ async def transfer(request: Request, payload: TransferRequest, db: AsyncSession 
 
     cfg = await _get_config(db)
     split = compute_fee_split(
-        amount=amount,
-        fee_rate=Decimal(str(cfg.transaction_fee_rate)),
-        reward_rate=Decimal(str(cfg.reward_rate)),
-        insurance_rate=Decimal(str(cfg.insurance_contribution_rate)),
+        amount=amount, fee_rate=Decimal(str(cfg.transaction_fee_rate)),
+        reward_rate=Decimal(str(cfg.reward_rate)), insurance_rate=Decimal(str(cfg.insurance_contribution_rate)),
     )
     total_debit = q2(amount + split.fee_amount)
 
-    # --- Fraud check (advisory unless high/critical) ---
-    fraud_result = await evaluate_transaction(db, user, amount, "transfer")
-
     sender_wallet = await get_or_create_account(db, AccountType.user_wallet, user.id)
+    recipient_wallet = await get_or_create_account(db, AccountType.user_wallet, recipient.id)
+    ledger = LedgerService(db)
+    await ledger.lock(sender_wallet, recipient_wallet)          # both wallets, always in id order
+    await db.refresh(sender_wallet)
+    await db.refresh(recipient_wallet)
+
     if Decimal(str(sender_wallet.balance)) < total_debit:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Insufficient wallet balance to cover amount + fee")
+    await enforce_outgoing(db, user, amount)
+    if not room_for(recipient.account_tier, Decimal(str(recipient_wallet.balance)), amount):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The recipient's account can't receive this amount right now")
 
-    ledger = LedgerService(db)
+    fraud_result = await evaluate_transaction(db, user, amount, "transfer")
     txn = await ledger.start_transaction(
-        type=TransactionType.transfer,
-        initiator_user_id=user.id,
-        counterparty_user_id=recipient.id,
-        amount=amount,
-        fee_amount=split.fee_amount,
-        reward_amount=split.reward_amount,
+        type=TransactionType.transfer, initiator_user_id=user.id, counterparty_user_id=recipient.id,
+        amount=amount, fee_amount=split.fee_amount, reward_amount=split.reward_amount,
         insurance_contribution=split.insurance_contribution,
-        narration=payload.narration or f"Transfer to {recipient.full_name}",
-        ip_address=get_client_ip(request),
+        narration=payload.narration or f"Transfer to {recipient.full_name}", ip_address=get_client_ip(request),
     )
-
     if fraud_result.blocking:
         await persist_flags(db, user.id, txn.id, fraud_result)
         txn.status = TransactionStatus.flagged
@@ -189,47 +180,39 @@ async def transfer(request: Request, payload: TransferRequest, db: AsyncSession 
                           details={"rules": [f[0] for f in fraud_result.flags]})
         await db.commit()
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Transaction blocked pending fraud review. Contact support.")
-    elif fraud_result.has_flags:
+    if fraud_result.has_flags:
         await persist_flags(db, user.id, txn.id, fraud_result)
 
-    recipient_wallet = await get_or_create_account(db, AccountType.user_wallet, recipient.id)
     sender_reward = await get_or_create_account(db, AccountType.user_reward, user.id)
     sender_insurance = await get_or_create_account(db, AccountType.user_insurance, user.id)
     reward_pool = await get_or_create_account(db, AccountType.platform_reward_pool)
     insurance_pool = await get_or_create_account(db, AccountType.platform_insurance_pool)
     platform_revenue = await get_or_create_account(db, AccountType.platform_revenue)
+    await ledger.lock(sender_reward, sender_insurance, reward_pool, insurance_pool, platform_revenue)
 
     try:
-        # Sender pays amount + fee out of wallet
         await ledger.post(txn, sender_wallet, "D", total_debit)
-        # Recipient receives the transfer amount
         await ledger.post(txn, recipient_wallet, "C", amount)
-        # The fee portion collected from the sender (total_debit - amount) is
-        # credited into the pools/revenue account it funds, so the ledger
-        # balances: reward_pool + insurance_pool + platform_revenue == fee_amount.
+        # the fee collected from the sender funds the pools + platform revenue, which sum to fee_amount
         if split.reward_amount > 0:
             await ledger.post(txn, reward_pool, "C", split.reward_amount)
         if split.insurance_contribution > 0:
             await ledger.post(txn, insurance_pool, "C", split.insurance_contribution)
         if split.platform_net > 0:
             await ledger.post(txn, platform_revenue, "C", split.platform_net)
-        # Pools immediately disburse to the sender's reward/insurance wallets.
         if split.reward_amount > 0:
             await ledger.post(txn, reward_pool, "D", split.reward_amount)
             await ledger.post(txn, sender_reward, "C", split.reward_amount)
         if split.insurance_contribution > 0:
             await ledger.post(txn, insurance_pool, "D", split.insurance_contribution)
             await ledger.post(txn, sender_insurance, "C", split.insurance_contribution)
-    except InsufficientFundsError as e:
-        await ledger.fail(txn, reason=str(e))
-        await db.commit()
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e))
-
-    try:
         await ledger.finalize(txn)
-    except LedgerImbalanceError as e:
+    except InsufficientFundsError:
         await db.rollback()
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Ledger integrity check failed: {e}")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Insufficient wallet balance to cover amount + fee")
+    except LedgerImbalanceError as exc:
+        await db.rollback()
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Ledger integrity check failed: {exc}")
 
     await log_action(db, "TRANSFER_COMPLETED", actor_user_id=str(user.id), actor_role=user.role,
                       entity_type="transaction", entity_id=str(txn.id), ip_address=get_client_ip(request),
@@ -240,96 +223,14 @@ async def transfer(request: Request, payload: TransferRequest, db: AsyncSession 
 
 @router.post("/withdraw", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
 async def withdraw(request: Request, payload: WithdrawRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    """Withdraw from wallet to an external bank account via the mock gateway."""
+    """Withdraw from the wallet to an external bank account via the mock gateway."""
     _require_pin_ok(user, payload.pin)
-    amount = q2(payload.amount)
-
-    cfg = await _get_config(db)
-    split = compute_fee_split(
-        amount=amount,
-        fee_rate=Decimal("0"),  # withdrawals use a flat fee, not percentage
-        reward_rate=Decimal(str(cfg.reward_rate)) / 2,  # smaller reward on withdrawals
-        insurance_rate=Decimal(str(cfg.insurance_contribution_rate)),
-        flat_fee=Decimal(str(cfg.withdrawal_fee_flat)),
+    txn, _ = await perform_bank_payout(
+        db, user=user, amount=q2(payload.amount), bank_code=payload.bank_code,
+        account_number=payload.bank_account_number, narration=payload.narration or "Withdrawal to bank account",
+        meta={"bank_account_number_last4": payload.bank_account_number[-4:], "bank_code": payload.bank_code},
+        ip=get_client_ip(request),
     )
-    total_debit = q2(amount + split.fee_amount)
-
-    fraud_result = await evaluate_transaction(db, user, amount, "withdrawal")
-
-    wallet = await get_or_create_account(db, AccountType.user_wallet, user.id)
-    if Decimal(str(wallet.balance)) < total_debit:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Insufficient wallet balance to cover amount + fee")
-
-    ledger = LedgerService(db)
-    txn = await ledger.start_transaction(
-        type=TransactionType.withdrawal,
-        initiator_user_id=user.id,
-        amount=amount,
-        fee_amount=split.fee_amount,
-        reward_amount=split.reward_amount,
-        insurance_contribution=split.insurance_contribution,
-        narration=payload.narration or "Withdrawal to bank account",
-        ip_address=get_client_ip(request),
-        metadata={"bank_account_number_last4": payload.bank_account_number[-4:], "bank_code": payload.bank_code},
-    )
-
-    if fraud_result.blocking:
-        await persist_flags(db, user.id, txn.id, fraud_result)
-        txn.status = TransactionStatus.flagged
-        await log_action(db, "TRANSACTION_BLOCKED_FRAUD", actor_user_id=str(user.id), actor_role=user.role,
-                          entity_type="transaction", entity_id=str(txn.id), ip_address=get_client_ip(request))
-        await db.commit()
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Transaction blocked pending fraud review. Contact support.")
-    elif fraud_result.has_flags:
-        await persist_flags(db, user.id, txn.id, fraud_result)
-
-    gw_result = await payment_gateway.initiate_withdrawal(
-        float(amount), payload.bank_account_number, payload.bank_code, user_reference=str(user.id)
-    )
-    txn.gateway_reference = gw_result.gateway_reference
-
-    if not gw_result.success:
-        await ledger.fail(txn, reason=gw_result.message)
-        await log_action(db, "WITHDRAWAL_FAILED", actor_user_id=str(user.id), actor_role=user.role,
-                          entity_type="transaction", entity_id=str(txn.id), ip_address=get_client_ip(request))
-        await db.commit()
-        raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED, gw_result.message)
-
-    reward_pool = await get_or_create_account(db, AccountType.platform_reward_pool)
-    insurance_pool = await get_or_create_account(db, AccountType.platform_insurance_pool)
-    platform_revenue = await get_or_create_account(db, AccountType.platform_revenue)
-    user_reward = await get_or_create_account(db, AccountType.user_reward, user.id)
-    user_insurance = await get_or_create_account(db, AccountType.user_insurance, user.id)
-    external = await get_or_create_account(db, AccountType.external_gateway)
-
-    try:
-        await ledger.post(txn, wallet, "D", total_debit)
-        await ledger.post(txn, external, "C", amount)  # principal leaves the platform to the bank
-        # The fee portion (total_debit - amount) stays inside the platform and
-        # funds reward_pool + insurance_pool + platform_revenue, which must sum
-        # to fee_amount for the ledger to balance.
-        if split.reward_amount > 0:
-            await ledger.post(txn, reward_pool, "C", split.reward_amount)
-        if split.insurance_contribution > 0:
-            await ledger.post(txn, insurance_pool, "C", split.insurance_contribution)
-        if split.platform_net > 0:
-            await ledger.post(txn, platform_revenue, "C", split.platform_net)
-        # Pools immediately disburse to the user's reward/insurance wallets.
-        if split.reward_amount > 0:
-            await ledger.post(txn, reward_pool, "D", split.reward_amount)
-            await ledger.post(txn, user_reward, "C", split.reward_amount)
-        if split.insurance_contribution > 0:
-            await ledger.post(txn, insurance_pool, "D", split.insurance_contribution)
-            await ledger.post(txn, user_insurance, "C", split.insurance_contribution)
-        await ledger.finalize(txn)
-    except (InsufficientFundsError, LedgerImbalanceError) as e:
-        await db.rollback()
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Ledger error: {e}")
-
-    await log_action(db, "WITHDRAWAL_COMPLETED", actor_user_id=str(user.id), actor_role=user.role,
-                      entity_type="transaction", entity_id=str(txn.id), ip_address=get_client_ip(request),
-                      details={"amount": float(amount)})
-    await db.commit()
     return txn
 
 

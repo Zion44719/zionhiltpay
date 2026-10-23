@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN useradd --create-home --shell /bin/bash zionhilt && chown -R zionhilt:zionhilt /app
+RUN mkdir -p /app/uploads && useradd --create-home --shell /bin/bash zionhilt && chown -R zionhilt:zionhilt /app
 USER zionhilt
 
 EXPOSE 8000

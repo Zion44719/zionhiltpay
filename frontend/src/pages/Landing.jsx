@@ -1,7 +1,10 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext.jsx'
+import PartnersMarquee from '../components/PartnersMarquee.jsx'
 
 export default function Landing() {
+  const { isAuthenticated } = useAuth()
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-24">
       <div className="max-w-2xl">
@@ -16,13 +19,21 @@ export default function Landing() {
           get cashback rewards, and automatically build up device insurance coverage for
           your phone or laptop — all from the transactions you're already making.
         </p>
-        <div className="flex gap-3">
-          <Link to="/register" className="zp-btn-primary">Create your wallet</Link>
-          <Link to="/login" className="zp-btn-secondary">I already have an account</Link>
+        <div className="flex flex-wrap gap-3">
+          {isAuthenticated ? (
+            <Link to="/dashboard" className="zp-btn-primary min-h-[48px]">Go to your dashboard</Link>
+          ) : (
+            <>
+              <Link to="/register" className="zp-btn-primary min-h-[48px]">Create your wallet</Link>
+              <Link to="/login" className="zp-btn-secondary min-h-[48px]">I already have an account</Link>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="grid sm:grid-cols-3 gap-5 mt-20">
+      <PartnersMarquee />
+
+      <div className="grid sm:grid-cols-3 gap-5 mt-14 sm:mt-20">
         <div className="zp-card p-6">
           <p className="text-gold-400 font-display text-xl mb-2">Rewards</p>
           <p className="text-sm text-slate-400 leading-relaxed">

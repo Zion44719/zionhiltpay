@@ -1,5 +1,6 @@
 import re
 import uuid
+from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, EmailStr, field_validator, model_validator, ConfigDict
 
@@ -176,3 +177,6 @@ class UserOut(BaseModel):
     kyc_status: str = "not_submitted"
     id_type: str | None = None
     id_number_last4: str | None = None  # the only part of the ID number any API ever returns
+    account_tier: int = 1
+    has_photo: bool = False
+    created_at: datetime | None = None

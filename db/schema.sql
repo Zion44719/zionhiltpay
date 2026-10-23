@@ -21,11 +21,12 @@ CREATE TYPE account_type AS ENUM (
     'platform_revenue',     -- platform commission/revenue clearing account
     'platform_reward_pool', -- funding source for rewards (contra account)
     'platform_insurance_pool', -- funding source for insurance (contra account)
-    'external_gateway'      -- represents external bank/payment gateway (contra account)
+    'external_gateway',     -- represents external bank/payment gateway (contra account)
+    'platform_loan_pool'    -- lending capital (negative balance = money currently lent out)
 );
 CREATE TYPE transaction_type AS ENUM (
     'deposit', 'withdrawal', 'transfer', 'reward_credit', 'insurance_contribution',
-    'insurance_claim_payout', 'fee', 'reversal'
+    'insurance_claim_payout', 'fee', 'reversal', 'loan_disbursement', 'loan_repayment'
 );
 CREATE TYPE transaction_status AS ENUM ('pending', 'processing', 'completed', 'failed', 'reversed', 'flagged');
 CREATE TYPE device_type AS ENUM ('phone', 'laptop', 'tablet', 'other');
@@ -71,6 +72,8 @@ CREATE TABLE users (
     kyc_reviewed_by UUID,
     kyc_reviewed_at TIMESTAMPTZ,
     kyc_note TEXT,
+    account_tier SMALLINT NOT NULL DEFAULT 1,   -- 1, 2 or 3: sets transaction and balance limits
+    profile_photo VARCHAR(64),                  -- file name only (files live outside the database)
 
     kyc_level SMALLINT NOT NULL DEFAULT 0, -- 0=unverified,1=basic,2=full
     tier_daily_limit NUMERIC(18,2) NOT NULL DEFAULT 50000.00,
@@ -336,5 +339,71 @@ VALUES
     ('platform_revenue', 'NGN', TRUE),
     ('platform_reward_pool', 'NGN', TRUE),
     ('platform_insurance_pool', 'NGN', TRUE),
-    ('external_gateway', 'NGN', TRUE)
+    ('external_gateway', 'NGN', TRUE),
+    ('platform_loan_pool', 'NGN', TRUE)
 ON CONFLICT DO NOTHING;
+
+
+-- ----------------------------------------------------------------------------
+-- TIER UPGRADE REQUESTS (BVN is encrypted exactly like ID numbers)
+-- ----------------------------------------------------------------------------
+CREATE TABLE tier_requests (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    target_tier SMALLINT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',   -- pending | approved | rejected
+    bvn_enc TEXT,
+    bvn_hash VARCHAR(64),
+    bvn_last4 VARCHAR(4),
+    address TEXT,
+    document_file VARCHAR(64),                       -- proof-of-address image; file name only
+    reviewed_by UUID,
+    reviewed_at TIMESTAMPTZ,
+    review_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_tier_requests_user_id ON tier_requests(user_id);
+CREATE UNIQUE INDEX uq_tier_requests_one_pending ON tier_requests (user_id) WHERE status = 'pending';
+CREATE UNIQUE INDEX uq_tier_requests_bvn ON tier_requests (bvn_hash) WHERE status IN ('pending','approved') AND bvn_hash IS NOT NULL;
+
+-- ----------------------------------------------------------------------------
+-- LOANS
+-- ----------------------------------------------------------------------------
+CREATE TABLE loans (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    reference VARCHAR(40) UNIQUE NOT NULL,
+    user_id UUID NOT NULL REFERENCES users(id),
+    principal NUMERIC(18,2) NOT NULL,
+    interest NUMERIC(18,2) NOT NULL,
+    total_due NUMERIC(18,2) NOT NULL,
+    principal_repaid NUMERIC(18,2) NOT NULL DEFAULT 0,
+    interest_repaid NUMERIC(18,2) NOT NULL DEFAULT 0,
+    tenor_days SMALLINT NOT NULL,
+    interest_rate_30d NUMERIC(6,4) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',    -- active | repaid
+    disbursed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    due_at TIMESTAMPTZ NOT NULL,
+    closed_at TIMESTAMPTZ
+);
+CREATE INDEX ix_loans_user_id ON loans(user_id);
+CREATE UNIQUE INDEX uq_loans_one_active ON loans (user_id) WHERE status = 'active';
+
+-- Exactly one platform account per type, and payouts are safe to retry.
+CREATE UNIQUE INDEX uq_platform_account_type ON accounts (account_type, currency) WHERE user_id IS NULL;
+CREATE UNIQUE INDEX uq_txn_client_reference ON transactions (initiator_user_id, ((metadata ->> 'client_reference'))) WHERE (metadata ->> 'client_reference') IS NOT NULL;
+
+
+-- ----------------------------------------------------------------------------
+-- PARTNERS (the scrolling logo strip on the landing page; managed by admins)
+-- ----------------------------------------------------------------------------
+CREATE TABLE partners (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(80) NOT NULL,
+    website VARCHAR(300),
+    logo_file VARCHAR(64),                 -- file name only (the image lives in the uploads folder)
+    sort_order SMALLINT NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_partners_order ON partners (sort_order, created_at);

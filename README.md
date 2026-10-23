@@ -25,6 +25,18 @@ On top of that ledger, ZionhiltPay layers two things most wallets don't offer:
   personal insurance pool. Register a phone or laptop, and if it's later lost, stolen, or damaged,
   you can file a claim against the coverage you've already accrued — no separate premium payments.
 
+It also includes the pieces a real wallet needs around that core:
+
+- **Account levels (Tier 1 to 3)** that set daily sending limits and the maximum wallet balance, with an
+  upgrade path (verified ID, BVN, proof of address) reviewed by admins.
+- **Transfers to any Nigerian bank account**: type the account number, the bank is narrowed down from the
+  number's check digit, and the account holder's name is shown before you pay.
+- **Loans** with a transparent flat fee, a live quote, and early repayment.
+- **Profile pictures**, **username / account-number / email / phone login**, and an **admin dashboard**
+  (users and KYC, tier upgrades, loans, transactions, fraud, claims, audit log).
+- A **partner logo strip** on the public landing page, scrolling across the screen and managed by admins.
+- A mobile-first interface that works from 320px phones up to desktop.
+
 > **Roadmap note — v1.1:** MAC-address based device tracking (to help locate a lost/stolen device)
 > is scoped for v1.1. The database schema and device model already include the `mac_address`,
 > `last_seen_at`, and `last_seen_location` fields so this ships without a migration later, but no
@@ -409,7 +421,7 @@ docker compose exec backend python -m scripts.create_admin --email admin@example
 Verification codes are printed in the backend logs: `docker compose logs -f backend`.
 
 Useful commands: `docker compose down` (stop, keeps data) and `docker compose down -v` (stop **and delete the
-database**).
+database and all uploaded photos/documents**, which live in the `zionhiltpay_uploads` volume).
 
 **Port already in use?** If you also have PostgreSQL installed on your machine, port `5432` is taken: in
 `docker-compose.yml` change the `db` port mapping to `"5433:5432"` (the backend still reaches it internally).
@@ -436,6 +448,11 @@ overrides the file.** Defaults are shown; everything marked *required* must be s
 | `ANTHROPIC_API_KEY` | empty | Turns on the AI assistant, insights and admin copilot. Without it they report "not enabled". |
 | `AGENT_MODEL` | `claude-sonnet-5-5` | Which Claude model the agents use. |
 | `MOCK_GATEWAY_SUCCESS_RATE` | `0.95` | Share of mock deposits/withdrawals that succeed. Set `1.0` to stop random declines. |
+| `UPLOAD_DIR`, `MAX_PHOTO_BYTES`, `MAX_DOCUMENT_BYTES`, `MAX_LOGO_BYTES` | `uploads`, `3000000`, `6000000`, `1000000` | Where profile photos, proof-of-address photos and partner logos are stored, and their size limits. Relative paths are relative to `backend/`. |
+| `TIER1_DAILY_LIMIT` ... `TIER3_MAX_BALANCE` | `50000`, `300000`, `200000`, `500000`, `5000000`, `0` | Per-tier daily sending limit and maximum wallet balance, in naira (`0` = unlimited). Defaults follow the CBN 2017 circular; confirm them for your licence. |
+| `BANK_PROVIDER`, `PAYSTACK_SECRET_KEY` | `mock`, empty | Source of the bank list and account-name lookup for bank transfers (`mock` or `paystack`). |
+| `LOANS_ENABLED`, `LOAN_MIN_AMOUNT`, `LOAN_TIER2_MAX`, `LOAN_TIER3_MAX` | `true`, `1000`, `50000`, `500000` | Whether loans are offered, and the smallest and largest loans by tier. |
+| `LOAN_TENORS_DAYS`, `LOAN_INTEREST_RATE_30D` | `[7,14,30]`, `0.05` | Repayment periods offered, and the flat fee per 30 days (scaled to the period). |
 | `RATE_LIMIT_AUTH`, `RATE_LIMIT_OTP`, `RATE_LIMIT_LOOKUP`, `RATE_LIMIT_AGENT` | `10/minute`, `5/minute`, `20/minute`, `20/minute` | Request limits per IP. |
 | `REWARD_RATE`, `TRANSACTION_FEE_RATE`, `INSURANCE_CONTRIBUTION_RATE`, `WITHDRAWAL_FEE_FLAT` | `0.005`, `0.015`, `0.01`, `25.00` | Default economics (a super admin can change them live under Admin, Config). |
 
@@ -494,6 +511,19 @@ existing database and gives every existing user a unique account number. It is s
 repeatedly. Existing users keep working (they can log in with their email or their new account number);
 they simply have no username or ID on file. Take a database backup first, as you would for any upgrade.
 
+**What changes for existing users when you add account levels:** everyone starts on Tier 1, so the Tier 1
+limits (₦50,000 a day, ₦300,000 balance) now apply to them, **including admin accounts created before this
+version**. `scripts.create_admin` creates new admins on Tier 3. To lift existing admins (run it once, in the
+same way as step 2 of the setup, using your own database user and name):
+
+```sql
+UPDATE users SET account_tier = 3 WHERE role IN ('admin', 'super_admin');
+```
+
+```powershell
+& $psql -U zp_app -h localhost -d zionhiltpay -c "UPDATE users SET account_tier = 3 WHERE role IN ('admin','super_admin');"
+```
+
 ---
 
 ## Troubleshooting
@@ -522,6 +552,12 @@ Find the **last line** of the error message in your terminal and match it below.
 | The **Admin** link is missing | The account isn't an admin | Admins can only be created with `scripts.create_admin` (step 6) |
 | A deposit fails now and then | The mock payment gateway declines ~5% on purpose | Retry, or set `MOCK_GATEWAY_SUCCESS_RATE=1.0` in `backend/.env` |
 | "PIN is too weak/common" | `0000`, `1234`, `1111`, `000000` and `123456` are blocked | Choose another PIN |
+| "This would go over your Tier 1 daily limit" or "Your wallet can hold at most ₦300,000" | That is the account-level limit doing its job | Request the next tier under *Settings, Account level & limits*, or change the `TIER*` settings. Admin accounts made before account levels existed are on Tier 1: see [Upgrading](#upgrading-an-existing-installation) |
+| "That isn't a valid JPEG, PNG or WebP image" / "too large" when adding a photo | Only real JPEG, PNG or WebP images up to 3 MB (photos) or 6 MB (documents) are accepted | Choose a different photo. PDFs are not accepted for proof of address |
+| "That account number doesn't look right for <bank>" | The account number fails that bank's check digit: a typo, or the wrong bank | Re-check the number and choose from the suggested banks |
+| Bank names look fake | `BANK_PROVIDER=mock` is on by default, so the bank list and account names are simulated | Use the sample accounts shown on the page, or configure `paystack` for real lookups |
+| The partner strip isn't on the landing page | It only appears when at least one partner is set to *Showing* | Add a partner under *Admin, Partners* and make sure *Show on site* is ticked |
+| A partner's logo won't upload ("not a valid image", "too large") | Only real PNG, JPEG or WebP files up to 1 MB are accepted; SVG is refused | Export the logo as a PNG (transparent is best) and keep it under 1 MB |
 
 <details>
 <summary><strong>Resetting a forgotten <code>postgres</code> password (Windows)</strong></summary>
@@ -579,30 +615,117 @@ The `finally` block restores `pg_hba.conf` even if something fails. Afterwards y
    allows 5 attempts; after that, request a new one.
 3. **Log in** with your **account number, username, email or phone number** plus your password, then
    set a **4–6 digit transaction PIN** — separate from your password, required for every transfer and
-   withdrawal. Your account number and ID verification status show on the dashboard.
+   withdrawal. Your account number and ID verification status show on the dashboard. While you're logged in,
+   clicking the ZionhiltPay logo always takes you back to your dashboard.
 4. **Fund your wallet** via Deposit (simulated through the mock payment gateway).
 5. **Send money** to anyone by **account number, username, email or phone number**. The app shows the
    recipient's name (first name and last initial) before you enter your PIN, and a mistyped account
    number is rejected by its check digit. A share of the fee comes back to you as reward cashback and
    device-insurance coverage, automatically.
-6. **Register a device** (phone/laptop/tablet) under Devices & Insurance to start building coverage.
-7. If a registered device is lost, stolen, or damaged, **file a claim** — payouts are capped at your
-   accrued insurance balance and a max coverage ratio of the device's estimated value.
+6. **Send to a bank account** (any Nigerian bank) from *Send to bank*: type the 10-digit account
+   number and the app suggests which banks it could belong to, then shows **who owns the account** before
+   you enter your PIN. Details in [Account levels, loans and bank transfers](#account-levels-loans-and-bank-transfers).
+7. **Add a profile picture** under *Settings, My profile*. You'll need one to reach Tier 2.
+8. **Raise your limits** under *Settings, Account level & limits*: you can see what you've used today and
+   exactly what each tier needs, then request the next tier.
+9. **Get a loan** under *Loans* once you're on Tier 2: choose an amount and a repayment period, see exactly
+   what you'll repay, confirm with your PIN, and repay any time (in full or in part).
+10. **Register a device** (phone/laptop/tablet) under Devices & Insurance to start building coverage.
+11. If a registered device is lost, stolen, or damaged, **file a claim**: payouts are capped at your
+    accrued insurance balance and a max coverage ratio of the device's estimated value.
 
 ### As an admin
 - **Overview** — live platform stats: user counts, total wallet/reward/insurance liabilities,
-  platform revenue, transaction volume, open fraud flags, pending claims.
-- **Users & KYC** — search by name, username, account number, email or phone; filter by KYC status;
+  platform revenue, transaction volume, open fraud flags, pending claims, pending tier upgrades, active loans.
+- **Users & KYC** — search by name, username, account number, email or phone (each card shows the customer's
+  photo and tier); filter by KYC status;
   verify or reject a submitted ID; freeze/unfreeze accounts. Only a `super_admin` can reveal a full ID
   number, and each reveal is written to the audit log (who looked at whose ID — never the number).
 - **Transactions** — every transaction on the platform, searchable by reference, username, account
   number or email, and filterable by status and type.
+- **Tier upgrades** — the queue of customers asking to move up a level. Each card shows the customer's
+  photo, the tier change, their ID status, the BVN (last 4 digits only; a `super_admin` can reveal it, and
+  that is audited) and, for Tier 3, the address and the proof-of-address photo (viewing is audited).
+  Approve or reject with a note the customer will see. Tier 2 can only be approved once their ID is verified.
+- **Loans** — every loan with its borrower, amounts, due date and an **Overdue** flag.
+- **Partners** — manage the logos that scroll across the landing page: add a company (name, optional
+  website, logo), choose the order, hide or show it, replace its logo, or delete it. See
+  [Partner logos on the landing page](#partner-logos-on-the-landing-page).
 - **Audit log** — the append-only trail of sensitive actions.
 - **Fraud flags** — review and resolve rule-triggered flags (velocity limits, large-amount
   transactions, new-account risk).
 - **Insurance claims** — approve (with optional partial payout amount) or reject pending claims.
 - **Config** *(super_admin only)* — live-tune reward rate, insurance contribution rate, transaction
   fee rate, withdrawal fee, and fraud thresholds without a redeploy.
+
+---
+
+### Account levels, loans and bank transfers
+
+**Account levels.** Every customer starts on Tier 1. A level sets how much they can send in a day (counted
+from midnight Lagos time) and how much their wallet can hold. These defaults follow the CBN's 2017
+mobile-money KYC circular and are **settings you control** (see [Configuration](#configuration)). Published
+figures differ between sources and change over time, so confirm the ones that apply to your licence.
+
+| Level | Send per day | Wallet can hold | How to reach it |
+|---|---|---|---|
+| Tier 1 | ₦50,000 | ₦300,000 | Automatic at sign-up |
+| Tier 2 | ₦200,000 | ₦500,000 | Verified ID + profile photo + BVN, approved by an admin |
+| Tier 3 | ₦5,000,000 | No limit | Tier 2 + residential address + a photo of a utility bill or similar, approved by an admin |
+
+Limits are enforced on deposits, transfers, bank transfers and withdrawals, after the customer's wallet is
+locked, so two simultaneous requests cannot both squeeze under the same limit. The BVN is stored encrypted
+like ID numbers. Proof of address must be a **photo** (PDFs are refused on purpose).
+
+**Bank transfers.** The customer types an account number; the app uses the CBN NUBAN check digit to suggest
+the banks it could belong to (usually two to four), they pick one, and the name on the account is fetched and
+shown before the PIN is entered. The server looks the name up itself and never trusts a name sent by the
+browser. Each form carries a one-time reference, so a double tap or a network retry cannot pay twice. The
+check digit works for banks with CBN codes; wallet-style fintechs that use other code formats can't be
+pre-checked, and the name lookup confirms those instead. Two providers sit behind one interface:
+
+- `BANK_PROVIDER=mock` (default): a built-in sample bank list and **made-up account names**, with sample
+  account numbers on screen so you can try it offline.
+- `BANK_PROVIDER=paystack` (with `PAYSTACK_SECRET_KEY`): the live bank list and real account-name lookup
+  through Paystack's API. This part was written against Paystack's documentation and tested with simulated
+  responses; it has not been run against the live service.
+
+**The payout itself is still simulated** by the mock payment gateway in both modes. Sending real money to a
+bank needs a provider's payout API plus webhooks and reconciliation, which is a separate piece of work.
+
+**Loans.** A deliberately simple product. Defaults: Tier 2 can borrow ₦1,000 to ₦50,000 and Tier 3 up to
+₦500,000, repaid within 7, 14 or 30 days, for a **flat fee of 5% per 30 days** scaled to the period (₦10,000
+for 14 days costs ₦233.33, so the customer repays ₦10,233.33; the fee is fixed the moment they accept). One
+loan at a time, early repayment allowed, and repayments clear the interest first. A loan can't push a wallet
+over its tier's balance limit. In the ledger a loan moves money from the `platform_loan_pool` account to the
+customer's wallet, and repayments move it back (principal to the pool, interest to platform revenue), so the
+books always balance. Overdue loans are flagged for admins; there are no late fees or automatic debits.
+
+> **Lending is regulated in Nigeria** (CBN and FCCPC digital-lending rules). This is software, not a licence:
+> don't offer real loans without the right registration and professional advice.
+
+**Uploaded files.** Profile photos, proof-of-address photos and partner logos are checked (real JPEG/PNG/WebP, size and
+pixel limits), **re-encoded from their pixels** so metadata such as location is dropped, stored under random
+names in `backend/uploads/` (a persistent volume in Docker), and served only through authenticated endpoints (partner logos are the one public exception, see below).
+Back this folder up together with the database.
+
+### Partner logos on the landing page
+
+Admins manage a strip of partner logos under **Admin, Partners**. It scrolls slowly across the public landing
+page, pauses when someone hovers over it, and becomes a still, wrapped grid for people whose device asks for
+reduced motion. The strip only appears once at least one partner is showing, so there is no empty box.
+
+- **What to upload:** a PNG, JPEG or WebP up to 1 MB (`MAX_LOGO_BYTES`). A transparent PNG works best. Logos are
+  shown on white tiles and scaled to fit, so dark and light logos both stay readable. A partner with no logo is
+  shown as its name. **SVG is refused on purpose**, because an SVG file can carry scripts.
+- **What happens to the file:** it is checked, re-encoded as a transparent PNG (so nothing hidden survives) and
+  stored under a random name in `backend/uploads/logos/`.
+- **Order and visibility:** a lower *Order* number appears first. *Hide* removes a partner from the site without
+  deleting it, and the admin screen still previews its logo.
+- **Public by design:** the landing page needs no login, so `GET /api/partners` and each active partner's logo
+  are public. Everything that changes partners requires an admin and is written to the audit log.
+- **Only add real partners.** Show only companies you genuinely work with, and only logos you have permission to
+  display. Company logos are trademarks.
 
 ---
 
@@ -689,6 +812,14 @@ Security was treated as a first-class requirement throughout, not bolted on:
   no-ops via Postgres rules).
 - **Role-based access control** — `user` / `admin` / `super_admin`, with platform-economics config
   changes gated behind `super_admin` specifically.
+- **Concurrency-safe money movement**: every balance change is a single atomic SQL statement with a
+  "cannot go below zero" guard, and the rows involved are locked in a fixed order. Simultaneous requests
+  cannot lose an update, overdraw a wallet, or slip under a tier limit. A test fires many concurrent deposits
+  and transfers and checks that every account still equals the sum of its ledger entries.
+- **Account tiers are enforced server-side** on every outgoing money path, with plain-language errors.
+- **Encrypted BVN and ID numbers**, **private re-encoded uploads** (no raw user file is ever stored or served),
+  and **audited admin access** to BVNs, IDs and proof-of-address documents.
+- **Retry-safe payouts**: a repeated client reference returns the original transaction instead of paying twice.
 - **Rate limiting** on auth and OTP endpoints to blunt brute-force and abuse.
 - **Security headers** (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, HSTS in
   production) applied to every response.
@@ -720,9 +851,9 @@ python -m pip install -r requirements-dev.txt     # pytest, pytest-asyncio, aios
 python -m pytest tests/ -q
 ```
 
-This runs the tests that need no database (53). The database tests are skipped until you point them at an
+This runs the tests that need no database (64). The database tests are skipped until you point them at an
 **empty test database**; they create the tables themselves (full instructions under
-[Run the tests](#run-the-tests)). With one, the whole suite runs (78 tests).
+[Run the tests](#run-the-tests)). With one, the whole suite runs (107 tests).
 
 Included unit tests cover the fee-split economics (`test_rewards.py`) and core security primitives
 (password/PIN hashing, OTP hashing, JWT round-tripping in `test_security.py`).
@@ -744,6 +875,16 @@ runs against a real Postgres and covers registration, login by all four identifi
 transfers by every identifier, the admin KYC flow and audited ID reveal, that ID numbers appear in no API
 response or log, and upgrading an old-version database.
 
+**Features tests.** `tests/test_features_integration.py` covers, against a real Postgres: concurrent
+deposits and transfers (the books must still reconcile, no wallet can be overdrawn, nobody can beat a daily
+limit), tier limits and balance caps, the bank list, check-digit suggestions, name lookup and retry-safe
+transfers, the Paystack provider (with simulated HTTP), profile-photo validation (including hostile files and
+a decompression bomb), the full Tier 1 to 3 journey with encrypted BVN and audited reveals, and the loan
+lifecycle with repayment order, overdue detection and races. `tests/test_partners_integration.py` covers the partner strip: who may manage partners, what the public sees (hidden
+partners and their logos stay private), transparency being preserved, hostile uploads (including an SVG with a
+script in it), and that replaced or deleted logos leave no file behind. `tests/test_nuban.py` checks the account-number
+check digit against the CBN's published examples.
+
 Beyond unit tests, the full stack was manually verified end-to-end during development: registration
 → OTP → login → PIN → deposit → transfer → withdrawal → device registration → insurance claim →
 admin review, with every resulting transaction's ledger entries independently confirmed to balance
@@ -760,11 +901,11 @@ zionhiltpay/
 ├── backend/
 │   ├── app/
 │   │   ├── core/                   # config, database, security, identity (account numbers, usernames, IDs),
-│   │   │                           #   crypto (ID encryption), migrations, db_guards, rate limiting
+│   │   │                           #   crypto (ID encryption), nuban (account check digit), migrations, db_guards, rate limiting
 │   │   ├── models/                 # SQLAlchemy ORM models
 │   │   ├── schemas/                # Pydantic request/response schemas
-│   │   ├── services/               # ledger, OTP, fraud, rewards, payment gateway, audit, directory, agent/
-│   │   ├── api/                    # routers: auth, wallet, devices, admin, agent
+│   │   ├── services/               # ledger, limits, payouts, uploads, banks/, OTP, fraud, rewards, gateway, audit, agent/
+│   │   ├── api/                    # routers: auth, wallet, banks, tier, profile, loans, partners, devices, admin, agent
 │   │   └── main.py                 # FastAPI app entrypoint
 │   ├── scripts/create_admin.py     # CLI to bootstrap admin accounts
 │   ├── tests/                      # pytest suite (unit + database integration)
@@ -774,8 +915,8 @@ zionhiltpay/
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/                  # route-level pages (incl. pages/admin/)
-│   │   ├── components/             # shared UI (navbar, copy button, KYC badge, ...)
+│   │   ├── pages/                  # dashboard, send money/bank, loans, settings, profile, account level, admin/
+│   │   ├── components/             # shared UI (navbar, partner logo strip, copy button, KYC badge, ...)
 │   │   ├── context/                # AuthContext
 │   │   ├── services/               # API client + endpoint groupings
 │   │   └── utils/                  # formatting and phone helpers

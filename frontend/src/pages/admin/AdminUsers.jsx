@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { adminApi } from '../../services/endpoints'
 import { apiErrorMessage } from '../../services/api'
 import { formatDate, formatAccountNumber } from '../../utils/format'
-import { Loader, Alert, KycBadge, CopyButton } from '../../components/UI.jsx'
+import { Loader, Alert, KycBadge, CopyButton, Avatar } from '../../components/UI.jsx'
 import { useAuth } from '../../context/AuthContext.jsx'
 
 const PAGE = 20
@@ -87,7 +87,9 @@ export default function AdminUsers() {
           {users.map((u) => (
             <article key={u.id} className="zp-card p-4">
               <div className="flex flex-wrap items-center gap-2 mb-2">
+                <Avatar name={u.full_name} has={u.has_photo} userId={u.id} size={36} />
                 <h3 className="text-slate-100 font-medium break-words">{u.full_name}</h3>
+                <span className="zp-pill text-gold-400 border-gold-500/40 bg-gold-500/10 whitespace-nowrap">Tier {u.account_tier}</span>
                 <span className="zp-pill text-slate-400 border-ink-600 whitespace-nowrap">{u.role}</span>
                 <KycBadge status={u.kyc_status} />
                 {u.is_frozen && <span className="zp-pill text-red-300 border-red-500/40 bg-red-500/10">Frozen</span>}

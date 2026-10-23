@@ -27,7 +27,7 @@ def _prepare_test_database():
         import app.models  # noqa: F401  (registers every table on Base.metadata)
         from app.core.database import Base
         from app.core.db_guards import install_db_guards
-        from app.core.migrations import upgrade_schema
+        from app.core.migrations import upgrade_schema, seed_platform_accounts
 
         engine = create_async_engine(url, poolclass=NullPool)
         try:
@@ -35,6 +35,8 @@ def _prepare_test_database():
                 await conn.run_sync(Base.metadata.create_all)
                 await upgrade_schema(conn)
                 await install_db_guards(conn)
+            async with engine.begin() as conn:
+                await seed_platform_accounts(conn)
         finally:
             await engine.dispose()
 

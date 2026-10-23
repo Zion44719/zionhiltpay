@@ -18,6 +18,7 @@ class AccountType(str, enum.Enum):
     platform_reward_pool = "platform_reward_pool"
     platform_insurance_pool = "platform_insurance_pool"
     external_gateway = "external_gateway"
+    platform_loan_pool = "platform_loan_pool"
 
 
 class Account(Base):

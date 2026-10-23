@@ -18,8 +18,11 @@ export function AdminLayout() {
           <NavLink to="/admin" end className={tabClass}>Overview</NavLink>
           <NavLink to="/admin/users" className={tabClass}>Users &amp; KYC</NavLink>
           <NavLink to="/admin/transactions" className={tabClass}>Transactions</NavLink>
+          <NavLink to="/admin/tier" className={tabClass}>Tier upgrades</NavLink>
+          <NavLink to="/admin/loans" className={tabClass}>Loans</NavLink>
           <NavLink to="/admin/fraud" className={tabClass}>Fraud flags</NavLink>
           <NavLink to="/admin/claims" className={tabClass}>Claims</NavLink>
+          <NavLink to="/admin/partners" className={tabClass}>Partners</NavLink>
           <NavLink to="/admin/audit" className={tabClass}>Audit log</NavLink>
           <NavLink to="/admin/copilot" className={tabClass}>AI copilot</NavLink>
           <NavLink to="/admin/config" className={tabClass}>Config</NavLink>
@@ -63,6 +66,9 @@ export default function AdminOverview() {
           <StatCard label="Transactions today" value={stats.transactions_today} />
           <StatCard label="Open fraud flags" value={stats.open_fraud_flags} accent="red" />
           <StatCard label="Pending claims" value={stats.pending_claims} accent="red" />
+          <StatCard label="Tier upgrades pending" value={stats.pending_tier_requests} accent="red" />
+          <StatCard label="Active loans" value={stats.active_loans} />
+          <StatCard label="Loans outstanding" value={formatNaira(stats.loans_outstanding)} />
         </div>
       )}
     </div>

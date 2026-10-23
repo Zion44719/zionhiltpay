@@ -79,6 +79,36 @@ class Settings(BaseSettings):
     AGENT_MAX_MESSAGE_CHARS: int = 2000
     RATE_LIMIT_AGENT: str = "20/minute"
 
+    # --- Uploads (profile photos and proof-of-address images). Stored OUTSIDE any web-served folder. ---
+    UPLOAD_DIR: str = "uploads"
+    MAX_PHOTO_BYTES: int = 3_000_000
+    MAX_DOCUMENT_BYTES: int = 6_000_000
+    MAX_LOGO_BYTES: int = 1_000_000
+
+    # --- Account tiers. Defaults follow the CBN's 2017 mobile-money KYC circular (daily cumulative
+    #     transaction limit / maximum balance). Sources disagree and the rules change: confirm the figures
+    #     that apply to YOUR licence category with the CBN before launching. 0 means unlimited. ---
+    TIER1_DAILY_LIMIT: float = 50000
+    TIER1_MAX_BALANCE: float = 300000
+    TIER2_DAILY_LIMIT: float = 200000
+    TIER2_MAX_BALANCE: float = 500000
+    TIER3_DAILY_LIMIT: float = 5000000
+    TIER3_MAX_BALANCE: float = 0
+
+    # --- Bank transfers (name enquiry + bank list) ---
+    BANK_PROVIDER: str = "mock"  # mock | paystack  (payouts themselves still use the mock gateway)
+    PAYSTACK_SECRET_KEY: str = ""
+    PAYSTACK_BASE_URL: str = "https://api.paystack.co"
+
+    # --- Loans. Lending is regulated (CBN / FCCPC digital-lending rules): get proper advice and
+    #     registration before offering real loans. ---
+    LOANS_ENABLED: bool = True
+    LOAN_MIN_AMOUNT: float = 1000
+    LOAN_TIER2_MAX: float = 50000
+    LOAN_TIER3_MAX: float = 500000
+    LOAN_TENORS_DAYS: List[int] = [7, 14, 30]
+    LOAN_INTEREST_RATE_30D: float = 0.05  # flat rate per 30 days, scaled by tenor (7 days = 7/30 of it)
+
     # --- Mock payment gateway ---
     MOCK_GATEWAY_SUCCESS_RATE: float = 0.95
     MOCK_GATEWAY_LATENCY_MS: int = 400

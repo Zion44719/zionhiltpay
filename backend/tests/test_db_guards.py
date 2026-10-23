@@ -48,14 +48,19 @@ async def test_guards_install_idempotently_and_block_tampering():
                      phone_number="+23480" + str(uuid.uuid4().int)[:8], password_hash="x")
             s.add(u)
             await s.flush()
-            acct = Account(user_id=u.id, account_type=AccountType.user_wallet)
+            acct = Account(user_id=u.id, account_type=AccountType.user_wallet, balance=100)   # consistent with the ledger entry below
             txn = Transaction(reference=f"GUARD-{uuid.uuid4().hex[:12]}",
                               type=TransactionType.deposit, amount=100)
             s.add_all([acct, txn])
             await s.flush()
+            counter = Account(user_id=u.id, account_type=AccountType.user_reward, balance=-100)
+            s.add(counter)
+            await s.flush()
             le = LedgerEntry(transaction_id=txn.id, account_id=acct.id,
                              direction="C", amount=100, balance_after=100)
             s.add(le)
+            s.add(LedgerEntry(transaction_id=txn.id, account_id=counter.id,       # the matching debit: a balanced pair
+                              direction="D", amount=100, balance_after=-100))
             await s.flush()
             le_id = le.id
             await s.commit()

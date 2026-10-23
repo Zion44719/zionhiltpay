@@ -20,6 +20,8 @@ class AdminUserOut(BaseModel):
     id_type: str | None = None
     id_number_last4: str | None = None  # the full number is only available via the audited reveal endpoint
     id_submitted_at: datetime | None = None
+    account_tier: int = 1
+    has_photo: bool = False
     created_at: datetime
 
 
@@ -54,6 +56,9 @@ class PlatformStatsOut(BaseModel):
     transactions_today: int
     open_fraud_flags: int
     pending_claims: int
+    pending_tier_requests: int = 0
+    loans_outstanding: float = 0.0
+    active_loans: int = 0
 
 
 class ConfigUpdateRequest(BaseModel):

@@ -31,6 +31,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://zionhilt:zionhilt@db:5432/zionhiltpay
       SYNC_DATABASE_URL: postgresql+psycopg2://zionhilt:zionhilt@db:5432/zionhiltpay
       CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000","http://localhost"]'
+    volumes:
+      - zionhiltpay_uploads:/app/uploads      # profile photos + proof-of-address images survive restarts
     depends_on:
       db:
         condition: service_healthy
@@ -57,3 +59,4 @@ services:
 
 volumes:
   zionhiltpay_pgdata:
+  zionhiltpay_uploads:

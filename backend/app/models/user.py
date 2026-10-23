@@ -59,6 +59,9 @@ class User(Base):
     kyc_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     kyc_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    account_tier: Mapped[int] = mapped_column(SmallInteger, default=1, nullable=False)   # 1, 2 or 3: sets limits
+    profile_photo: Mapped[str | None] = mapped_column(String(64), nullable=True)          # file name only, never a path
+
     kyc_level: Mapped[int] = mapped_column(SmallInteger, default=0, nullable=False)
     tier_daily_limit: Mapped[float] = mapped_column(Numeric(18, 2), default=50000.00, nullable=False)
 
@@ -67,3 +70,7 @@ class User(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def has_photo(self) -> bool:
+        return bool(self.profile_photo)

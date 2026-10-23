@@ -18,7 +18,8 @@ import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.orm.attributes import set_committed_value
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account, AccountType
@@ -114,25 +115,40 @@ class LedgerService:
         self._pending_sum[txn.id] = Decimal("0.00")
         return txn
 
+    async def lock(self, *accounts: Account) -> None:
+        """Lock the given account rows for the rest of the transaction, always in ascending id order, so two
+        concurrent operations touching the same accounts (e.g. A pays B while B pays A) queue up instead of
+        deadlocking. Call this once, before the first post()."""
+        ids = sorted({a.id for a in accounts if a is not None}, key=str)
+        if ids:
+            await self.db.execute(select(Account.id).where(Account.id.in_(ids)).order_by(Account.id).with_for_update())
+
     async def post(self, txn: Transaction, account: Account, direction: str, amount) -> LedgerEntry:
-        """Post a single leg. direction: 'D' (decrease) or 'C' (increase)."""
+        """Post a single leg. direction: 'D' (decrease) or 'C' (increase).
+
+        The balance change is ONE atomic SQL statement (balance = balance +/- amount), never a read in Python
+        followed by a write. That is what makes concurrent deposits add up correctly, and the
+        `balance >= amount` guard is what makes it impossible to overdraw a wallet however many requests
+        arrive at once.
+        """
         amount = q2(amount)
         if amount <= 0:
             raise ValueError("Ledger entry amount must be positive")
-
-        current_balance = Decimal(str(account.balance))
-        if direction == "D":
-            new_balance = current_balance - amount
-            if new_balance < 0 and account.account_type == AccountType.user_wallet:
-                raise InsufficientFundsError(f"Insufficient balance in account {account.id}")
-            self._pending_sum[txn.id] = self._pending_sum.get(txn.id, Decimal("0.00")) - amount
-        elif direction == "C":
-            new_balance = current_balance + amount
-            self._pending_sum[txn.id] = self._pending_sum.get(txn.id, Decimal("0.00")) + amount
-        else:
+        if direction not in ("D", "C"):
             raise ValueError("direction must be 'D' or 'C'")
 
-        account.balance = new_balance
+        stmt = update(Account).where(Account.id == account.id)
+        if direction == "D" and account.account_type == AccountType.user_wallet:
+            stmt = stmt.where(Account.balance >= amount)
+        delta = amount if direction == "C" else -amount
+        stmt = stmt.values(balance=Account.balance + delta).returning(Account.balance).execution_options(synchronize_session=False)
+        row = (await self.db.execute(stmt)).first()
+        if row is None:
+            raise InsufficientFundsError(f"Insufficient balance in account {account.id}")
+        new_balance = Decimal(str(row[0]))
+        set_committed_value(account, "balance", new_balance)   # keep the in-memory object in step without a second UPDATE
+
+        self._pending_sum[txn.id] = self._pending_sum.get(txn.id, Decimal("0.00")) + (amount if direction == "C" else -amount)
         entry = LedgerEntry(
             transaction_id=txn.id,
             account_id=account.id,

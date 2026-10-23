@@ -328,6 +328,7 @@ async def test_upgrade_of_an_old_database_adds_columns_and_backfills():
             await conn.execute(text(f"CREATE SCHEMA {schema}"))
             await conn.execute(text(f"SET LOCAL search_path TO {schema}"))
             await conn.execute(text("CREATE TABLE users (id uuid PRIMARY KEY, full_name text NOT NULL, email text NOT NULL)"))
+            await conn.execute(text("CREATE TYPE transaction_type AS ENUM ('deposit', 'transfer')"))   # an OLD enum without the loan values
             for i in range(25):
                 await conn.execute(text("INSERT INTO users VALUES (gen_random_uuid(), :n, :e)"), {"n": f"U{i}", "e": f"u{i}@old.example"})
             assert await upgrade_schema(conn) == 25
@@ -338,7 +339,13 @@ async def test_upgrade_of_an_old_database_adds_columns_and_backfills():
             assert all(r[1] == "not_submitted" and r[2] is None for r in rows)   # existing users: no ID yet, no username
             cols = {r[0] for r in (await conn.execute(text(
                 "select column_name from information_schema.columns where table_schema=:s and table_name='users'"), {"s": schema})).all()}
-            assert {"username", "account_number", "id_type", "id_number_enc", "id_number_hash", "id_number_last4", "kyc_status"} <= cols
+            assert {"username", "account_number", "id_type", "id_number_enc", "id_number_hash", "id_number_last4", "kyc_status", "account_tier", "profile_photo"} <= cols
+            assert all(r[0] == 1 for r in (await conn.execute(text("SELECT account_tier FROM users"))).all())      # everyone starts on tier 1
+            # read the catalog (a just-added enum value cannot be USED until the transaction commits, but can be listed)
+            labels = {r[0] for r in (await conn.execute(text(
+                "SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace "
+                "WHERE t.typname='transaction_type' AND n.nspname=:s"), {"s": schema})).all()}
+            assert {"deposit", "transfer", "loan_disbursement", "loan_repayment"} <= labels
             # the unique index really enforces uniqueness
             with pytest.raises(Exception):
                 async with conn.begin_nested():

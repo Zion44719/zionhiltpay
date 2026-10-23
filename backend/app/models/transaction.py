@@ -19,6 +19,8 @@ class TransactionType(str, enum.Enum):
     insurance_claim_payout = "insurance_claim_payout"
     fee = "fee"
     reversal = "reversal"
+    loan_disbursement = "loan_disbursement"
+    loan_repayment = "loan_repayment"
 
 
 class TransactionStatus(str, enum.Enum):

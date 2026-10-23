@@ -23,6 +23,12 @@ from app.services.ledger import LedgerService, get_or_create_account, q2
 from app.services.audit import log_action
 from app.api.deps import get_current_admin, get_current_super_admin, get_client_ip
 from app.core.crypto import decrypt_id
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import Literal
+from app.models.tier import TierRequest
+from app.models.loan import Loan
+from app.services import uploads
 from app.core.limiter import limiter
 from app.models.transaction import TransactionType
 
@@ -299,7 +305,11 @@ async def platform_stats(db: AsyncSession = Depends(get_db), admin: User = Depen
     open_flags = (await db.execute(select(func.count(FraudFlag.id)).where(FraudFlag.resolved == False))).scalar_one()  # noqa: E712
     pending_claims = (await db.execute(select(func.count(InsuranceClaim.id)).where(InsuranceClaim.status.in_(["submitted", "under_review"])))).scalar_one()
 
+    pending_tier = (await db.execute(select(func.count(TierRequest.id)).where(TierRequest.status == "pending"))).scalar_one()
+    loan_rows = (await db.execute(select(Loan).where(Loan.status == "active"))).scalars().all()
+    loans_outstanding = sum(float(l.total_due) - float(l.principal_repaid) - float(l.interest_repaid) for l in loan_rows)
     return PlatformStatsOut(
+        pending_tier_requests=pending_tier, loans_outstanding=round(loans_outstanding, 2), active_loans=len(loan_rows),
         total_users=total_users,
         active_users=active_users,
         frozen_users=frozen_users,
@@ -366,3 +376,114 @@ async def update_config(request: Request, payload: ConfigUpdateRequest, db: Asyn
                       entity_type="platform_config", ip_address=get_client_ip(request), details=changes)
     await db.commit()
     return cfg
+
+
+
+# ----------------------------------------------------------------------------
+# Tier upgrades, loans, profile photos
+# ----------------------------------------------------------------------------
+class TierDecision(BaseModel):
+    decision: Literal["approve", "reject"]
+    note: str | None = None
+
+
+def _tier_request_view(r: TierRequest, u: User) -> dict:
+    return {
+        "id": str(r.id), "target_tier": r.target_tier, "status": r.status, "created_at": r.created_at,
+        "reviewed_at": r.reviewed_at, "review_note": r.review_note, "bvn_last4": r.bvn_last4, "address": r.address,
+        "has_document": bool(r.document_file),
+        "user": {"id": str(u.id), "full_name": u.full_name, "username": u.username, "account_number": u.account_number,
+                 "current_tier": u.account_tier, "kyc_status": u.kyc_status, "has_photo": u.has_photo},
+    }
+
+
+@router.get("/tier-requests")
+async def list_tier_requests(status_filter: str | None = Query("pending", alias="status"), db: AsyncSession = Depends(get_db),
+                             admin: User = Depends(get_current_admin)):
+    stmt = select(TierRequest, User).join(User, User.id == TierRequest.user_id).order_by(TierRequest.created_at.desc()).limit(200)
+    if status_filter:
+        stmt = stmt.where(TierRequest.status == status_filter)
+    return [_tier_request_view(r, u) for r, u in (await db.execute(stmt)).all()]
+
+
+@router.post("/tier-requests/{request_id}/decision")
+async def decide_tier_request(request_id: uuid.UUID, request: Request, payload: TierDecision,
+                              db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin)):
+    row = (await db.execute(select(TierRequest).where(TierRequest.id == request_id).with_for_update())).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Request not found")
+    if row.status != "pending":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"This request was already {row.status}")
+    user = (await db.execute(select(User).where(User.id == row.user_id))).scalar_one()
+    if user.id == admin.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You cannot review your own upgrade request")
+    if payload.decision == "approve":
+        if row.target_tier == 2 and user.kyc_status != "verified":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Verify this customer's ID first (Users & KYC)")
+        if row.target_tier != user.account_tier + 1:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The customer's tier changed since this request was made")
+        user.account_tier = row.target_tier
+        row.status = "approved"
+    else:
+        row.status = "rejected"
+    row.reviewed_by, row.reviewed_at, row.review_note = admin.id, datetime.now(timezone.utc), payload.note
+    await log_action(db, f"TIER_{row.status.upper()}", actor_user_id=str(admin.id), actor_role=admin.role,
+                      entity_type="tier_request", entity_id=str(row.id), ip_address=get_client_ip(request),
+                      details={"target_tier": row.target_tier, "user_id": str(user.id), "note": payload.note})
+    await db.commit()
+    return {"status": row.status, "user_tier": user.account_tier}
+
+
+@router.get("/tier-requests/{request_id}/document")
+async def tier_request_document(request_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db),
+                                admin: User = Depends(get_current_admin)):
+    row = (await db.execute(select(TierRequest).where(TierRequest.id == request_id))).scalar_one_or_none()
+    if row is None or not row.document_file:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No document")
+    path = uploads.file_path("documents", row.document_file)
+    if not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No document")
+    await log_action(db, "TIER_DOCUMENT_VIEWED", actor_user_id=str(admin.id), actor_role=admin.role,
+                      entity_type="tier_request", entity_id=str(row.id), ip_address=get_client_ip(request))
+    await db.commit()
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, no-store"})
+
+
+@router.post("/tier-requests/{request_id}/reveal-bvn")
+@limiter.limit("10/minute")
+async def reveal_bvn(request_id: uuid.UUID, request: Request, db: AsyncSession = Depends(get_db),
+                     admin: User = Depends(get_current_super_admin)):
+    row = (await db.execute(select(TierRequest).where(TierRequest.id == request_id))).scalar_one_or_none()
+    if row is None or not row.bvn_enc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No BVN on file for that request")
+    try:
+        bvn = decrypt_id(row.bvn_enc)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc))
+    await log_action(db, "BVN_REVEALED", actor_user_id=str(admin.id), actor_role=admin.role, entity_type="tier_request",
+                      entity_id=str(row.id), ip_address=get_client_ip(request))
+    await db.commit()
+    return {"bvn": bvn}
+
+
+@router.get("/loans")
+async def list_all_loans(status_filter: str | None = Query(None, alias="status"), page: int = Query(1, ge=1),
+                         page_size: int = Query(25, ge=1, le=100), db: AsyncSession = Depends(get_db),
+                         admin: User = Depends(get_current_admin)):
+    from app.api.loans import loan_out
+    stmt = select(Loan, User).join(User, User.id == Loan.user_id).order_by(Loan.disbursed_at.desc())
+    if status_filter:
+        stmt = stmt.where(Loan.status == status_filter)
+    rows = (await db.execute(stmt.offset((page - 1) * page_size).limit(page_size))).all()
+    return [{**loan_out(l), "user": {"full_name": u.full_name, "username": u.username, "account_number": u.account_number}} for l, u in rows]
+
+
+@router.get("/users/{user_id}/photo")
+async def user_photo(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), admin: User = Depends(get_current_admin)):
+    u = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if u is None or not u.profile_photo:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No photo")
+    path = uploads.file_path("avatars", u.profile_photo)
+    if not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No photo")
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=60"})

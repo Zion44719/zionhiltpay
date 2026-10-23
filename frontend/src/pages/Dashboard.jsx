@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { walletApi } from '../services/endpoints'
+import { walletApi, tierApi } from '../services/endpoints'
 import { apiErrorMessage } from '../services/api'
 import { formatNaira, formatAccountNumber } from '../utils/format'
-import { StatCard, TransactionRow, Loader, Alert, CopyButton, KycBadge } from '../components/UI.jsx'
+import { StatCard, TransactionRow, Loader, Alert, CopyButton, KycBadge, Avatar } from '../components/UI.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 
 export default function Dashboard() {
   const { profile } = useAuth()
   const [balance, setBalance] = useState(null)
   const [txns, setTxns] = useState([])
+  const [tier, setTier] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -19,10 +20,11 @@ export default function Dashboard() {
       setLoading(true)
       setError('')
       try {
-        const [balRes, txnRes] = await Promise.all([walletApi.balance(), walletApi.transactions(1, 6)])
+        const [balRes, txnRes, tierRes] = await Promise.all([walletApi.balance(), walletApi.transactions(1, 6), tierApi.overview().catch(() => null)])
         if (!mounted) return
         setBalance(balRes.data)
         setTxns(txnRes.data.items)
+        setTier(tierRes?.data || null)
       } catch (err) {
         if (mounted) setError(apiErrorMessage(err))
       } finally {
@@ -38,10 +40,15 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
-      <h1 className="font-display text-2xl sm:text-3xl text-white mb-1">
-        Welcome{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}
-      </h1>
-      <p className="text-slate-400 text-sm mb-5">Here's where things stand today.</p>
+      <div className="flex items-center gap-3 mb-5">
+        <Avatar name={profile?.full_name} has={profile?.has_photo} size={48} />
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl sm:text-3xl text-white truncate">
+            Welcome{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}
+          </h1>
+          <p className="text-slate-400 text-sm">Here's where things stand today.</p>
+        </div>
+      </div>
 
       <Alert type="error">{error}</Alert>
 
@@ -56,6 +63,14 @@ export default function Dashboard() {
           </div>
           <CopyButton text={accountNumber} className="shrink-0" />
         </section>
+      )}
+
+      {tier && (
+        <p className="text-xs text-slate-400 mb-4">
+          <span className="zp-pill text-gold-400 border-gold-500/40 bg-gold-500/10 mr-2">Tier {tier.current_tier}</span>
+          {tier.usage.remaining_today != null ? `${formatNaira(tier.usage.remaining_today)} left to send today. ` : 'No daily limit. '}
+          {tier.next_tier && <Link to="/settings/level" className="text-gold-400 hover:underline">Raise your limits</Link>}
+        </p>
       )}
 
       {kyc && kyc !== 'not_submitted' && (
@@ -80,9 +95,9 @@ export default function Dashboard() {
 
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-3 mb-8">
             <Link to="/transfer" className="zp-btn-primary min-h-[48px]">Send money</Link>
+            <Link to="/send-to-bank" className="zp-btn-secondary min-h-[48px]">Send to bank</Link>
             <Link to="/deposit" className="zp-btn-secondary min-h-[48px]">Fund wallet</Link>
-            <Link to="/withdraw" className="zp-btn-secondary min-h-[48px]">Withdraw</Link>
-            <Link to="/devices" className="zp-btn-secondary min-h-[48px]">Devices</Link>
+            <Link to="/loans" className="zp-btn-secondary min-h-[48px]">Loans</Link>
           </div>
 
           <div className="zp-card p-4 sm:p-6">

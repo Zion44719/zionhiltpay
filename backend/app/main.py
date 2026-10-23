@@ -15,9 +15,9 @@ from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.database import engine, Base
 from app.core.db_guards import install_db_guards
-from app.core.migrations import upgrade_schema
+from app.core.migrations import upgrade_schema, seed_platform_accounts
 from app.core.crypto import validate_encryption_key
-from app.api import auth, wallet, devices, admin, agent
+from app.api import auth, wallet, devices, admin, banks, tier, profile, loans, partners, agent
 
 logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
@@ -41,6 +41,8 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
         await upgrade_schema(conn)     # add new columns/indexes to older databases, backfill account numbers
         await install_db_guards(conn)  # append-only ledger/audit + updated_at triggers
+    async with engine.begin() as conn:
+        await seed_platform_accounts(conn)  # separate transaction: new enum values must be committed first
     logger.info("Database schema verified/created; integrity guards installed.")
     yield
     logger.info("ZionhiltPay backend shutting down.")
@@ -92,6 +94,12 @@ app.include_router(auth.router)
 app.include_router(wallet.router)
 app.include_router(devices.router)
 app.include_router(admin.router)
+app.include_router(banks.router)
+app.include_router(tier.router)
+app.include_router(profile.router)
+app.include_router(loans.router)
+app.include_router(partners.public)
+app.include_router(partners.admin)
 app.include_router(agent.router)
 
 

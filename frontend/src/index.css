@@ -61,3 +61,28 @@
     background-position: -3px center;
   }
 }
+
+/* ---------- Partner logo strip on the landing page ---------- */
+@keyframes zp-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.zp-marquee {
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 7%, #000 93%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 7%, #000 93%, transparent);
+}
+.zp-marquee-track {
+  display: flex; width: max-content; margin: 0; padding: 0; list-style: none;
+  animation: zp-marquee var(--zp-marquee-duration, 40s) linear infinite;
+}
+.zp-marquee:hover .zp-marquee-track, .zp-marquee:focus-within .zp-marquee-track { animation-play-state: paused; }
+.zp-partner-tile {
+  display: flex; align-items: center; justify-content: center; height: 64px; min-width: 150px;
+  margin: 0 0.5rem; padding: 0 1.25rem; border-radius: 0.75rem; background: rgba(255, 255, 255, 0.94);
+  transition: transform .2s ease;
+}
+a:hover > .zp-partner-tile, a:focus-visible > .zp-partner-tile { transform: translateY(-2px); }
+/* People who ask their device for less motion get a still, wrapped grid of each partner once */
+@media (prefers-reduced-motion: reduce) {
+  .zp-marquee { -webkit-mask-image: none; mask-image: none; }
+  .zp-marquee-track { animation: none; width: auto; flex-wrap: wrap; justify-content: center; gap: 0.75rem 0; }
+  .zp-marquee-dup { display: none; }
+}
