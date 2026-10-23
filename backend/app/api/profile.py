@@ -1,10 +1,19 @@
 """My profile: details and profile picture."""
+from typing import Literal
+
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from pydantic import BaseModel, model_validator
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_client_ip, get_current_user
+from datetime import datetime, timezone
+
+from app.core import identity as idt
 from app.core.config import settings
+from app.core.crypto import encrypt_id, id_fingerprint
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.models.user import User
@@ -58,3 +67,41 @@ async def delete_photo(request: Request, db: AsyncSession = Depends(get_db), use
     await db.commit()
     uploads.delete_file("avatars", old)
     return {"has_photo": False}
+
+
+class IdentityUpdate(BaseModel):
+    id_type: Literal["national_id", "drivers_license"]
+    id_number: str
+    consent_id_processing: bool
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.consent_id_processing is not True:
+            raise ValueError("You must consent to ZionhiltPay processing your ID for identity verification")
+        self.id_number = idt.normalize_id_number(self.id_type, self.id_number)
+        return self
+
+
+@router.put("/identity")
+@limiter.limit("10/hour")
+async def update_identity(request: Request, payload: IdentityUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    """Correct or add your ID number (for example after a rejection, or if you registered before IDs were collected).
+    It goes back into the review queue. A verified ID can only be changed by contacting support."""
+    if user.kyc_status == "verified":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Your ID is already verified. Contact support if it needs to change.")
+    fp = id_fingerprint(payload.id_type, payload.id_number)
+    clash = (await db.execute(select(User.id).where(User.id_type == payload.id_type, User.id_number_hash == fp, User.id != user.id))).first()
+    if clash:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This ID number is already linked to an account")
+    user.id_type, user.id_number_enc, user.id_number_hash = payload.id_type, encrypt_id(payload.id_number), fp
+    user.id_number_last4 = payload.id_number[-4:]
+    user.id_submitted_at, user.kyc_status = datetime.now(timezone.utc), "submitted"
+    user.kyc_note, user.kyc_reviewed_by, user.kyc_reviewed_at = None, None, None
+    await log_action(db, "ID_RESUBMITTED", actor_user_id=str(user.id), actor_role=user.role, entity_type="user",
+                     entity_id=str(user.id), ip_address=get_client_ip(request), details={"id_type": payload.id_type})   # never the number
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "This ID number is already linked to an account")
+    return {"kyc_status": user.kyc_status, "id_type": user.id_type, "id_number_last4": user.id_number_last4}

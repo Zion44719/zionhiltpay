@@ -351,7 +351,7 @@ CREATE TABLE tier_requests (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     target_tier SMALLINT NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'pending',   -- pending | approved | rejected
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',     -- draft | pending | approved | rejected
     bvn_enc TEXT,
     bvn_hash VARCHAR(64),
     bvn_last4 VARCHAR(4),
@@ -360,10 +360,14 @@ CREATE TABLE tier_requests (
     reviewed_by UUID,
     reviewed_at TIMESTAMPTZ,
     review_note TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    submitted_at TIMESTAMPTZ,
+    edit_count SMALLINT NOT NULL DEFAULT 0       -- edits made after submitting
 );
 CREATE INDEX ix_tier_requests_user_id ON tier_requests(user_id);
 CREATE UNIQUE INDEX uq_tier_requests_one_pending ON tier_requests (user_id) WHERE status = 'pending';
+CREATE UNIQUE INDEX uq_tier_requests_one_open ON tier_requests (user_id) WHERE status IN ('draft','pending');
 CREATE UNIQUE INDEX uq_tier_requests_bvn ON tier_requests (bvn_hash) WHERE status IN ('pending','approved') AND bvn_hash IS NOT NULL;
 
 -- ----------------------------------------------------------------------------

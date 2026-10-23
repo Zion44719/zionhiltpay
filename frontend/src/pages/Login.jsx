@@ -77,7 +77,8 @@ export default function Login() {
         </button>
       </form>
 
-      <p className="text-center text-sm text-slate-500 mt-6">
+      <p className="text-center text-xs text-slate-500 mt-5">Staff? Sign in with your admin username, then open <strong className="text-slate-400">Admin</strong> from the menu or your dashboard.</p>
+      <p className="text-center text-sm text-slate-500 mt-4">
         New to ZionhiltPay? <Link to="/register" className="text-gold-400 hover:underline">Create an account</Link>
       </p>
     </div>

@@ -557,6 +557,9 @@ Find the **last line** of the error message in your terminal and match it below.
 | "That account number doesn't look right for <bank>" | The account number fails that bank's check digit: a typo, or the wrong bank | Re-check the number and choose from the suggested banks |
 | Bank names look fake | `BANK_PROVIDER=mock` is on by default, so the bank list and account names are simulated | Use the sample accounts shown on the page, or configure `paystack` for real lookups |
 | The partner strip isn't on the landing page | It only appears when at least one partner is set to *Showing* | Add a partner under *Admin, Partners* and make sure *Show on site* is ticked |
+| I log in as an admin but don't see any Admin link | The account isn't an admin (sign-up accounts are always customers) | Create one with the command in [Step 6](#step-6-create-your-first-admin-account-terminal-3), or promote an existing account once: `UPDATE users SET role = 'admin', account_tier = 3 WHERE username = 'theirusername';` |
+| "Still needed: your ID number" when submitting documents | The ID was rejected or never submitted | Open *Verification documents*, tap **Edit** on *ID number*, enter it and save: it goes back to the review queue |
+| "Your request is under review, so it must stay complete" | You tried to remove an item from a submission that is being reviewed | Replace the item instead, or withdraw the request and start a new draft |
 | A partner's logo won't upload ("not a valid image", "too large") | Only real PNG, JPEG or WebP files up to 1 MB are accepted; SVG is refused | Export the logo as a PNG (transparent is best) and keep it under 1 MB |
 
 <details>
@@ -626,13 +629,50 @@ The `finally` block restores `pg_hba.conf` even if something fails. Afterwards y
    number and the app suggests which banks it could belong to, then shows **who owns the account** before
    you enter your PIN. Details in [Account levels, loans and bank transfers](#account-levels-loans-and-bank-transfers).
 7. **Add a profile picture** under *Settings, My profile*. You'll need one to reach Tier 2.
-8. **Raise your limits** under *Settings, Account level & limits*: you can see what you've used today and
-   exactly what each tier needs, then request the next tier.
+8. **Raise your limits** under *Settings, Verification documents*. Add your documents one at a time (ID number,
+   profile photo, BVN and, for Tier 3, your address and a photo of a utility bill). Everything is saved as a
+   private **draft** so you can come back and finish later, and **every item has its own Edit button**: fix a
+   typo, replace a photo, or correct an ID that was rejected. Choose **Tier 2**, or go **straight from Tier 1 to
+   Tier 3**, then tap **Submit for review**. You can keep editing while it is being reviewed, and *Settings,
+   Account level & limits* shows what you've used today and what each tier allows.
 9. **Get a loan** under *Loans* once you're on Tier 2: choose an amount and a repayment period, see exactly
    what you'll repay, confirm with your PIN, and repay any time (in full or in part).
 10. **Register a device** (phone/laptop/tablet) under Devices & Insurance to start building coverage.
 11. If a registered device is lost, stolen, or damaged, **file a claim**: payouts are capped at your
     accrued insurance balance and a max coverage ratio of the device's estimated value.
+
+### Opening the admin dashboard, step by step
+
+The admin dashboard is part of the same website: there is no separate admin app or address to remember.
+Admin accounts can't be created through the sign-up page (on purpose, so nobody can make themselves an admin),
+so there is one small setup step first.
+
+**One-time setup: create an administrator.** If you haven't yet, run the command in
+[Step 6](#step-6-create-your-first-admin-account-terminal-3) (or the Docker version in
+[Option B](#option-b-run-it-with-docker)). It prints the username, email and phone you can log in with.
+
+**Then, in the browser:**
+
+1. Open the site: <http://localhost:5173> (with Docker: <http://localhost>).
+2. Tap or click **Log in** in the top right.
+3. Enter your admin **username** (or email, phone or account number) and your password, then **Log in**.
+   The first time, you are asked to set a 4 to 6 digit transaction PIN.
+4. You arrive on your dashboard. Open the admin dashboard in whichever way is closest:
+   - tap **Open** on the gold **Admin portal** card at the top of the dashboard; or
+   - **on a phone:** tap the **☰ menu**, then **Admin dashboard**; or
+   - **on a laptop:** click **Admin** in the top bar; or
+   - open **Settings** and tap **Admin dashboard** (the first row); or
+   - type `/admin` after the site address, for example <http://localhost:5173/admin>.
+5. You're in. Use the tabs across the top: **Overview**, **Users & KYC**, **Transactions**, **Tier upgrades**,
+   **Loans**, **Fraud flags**, **Claims**, **Partners**, **Audit log**, **AI copilot** and **Config**. On a phone,
+   swipe the tabs sideways to reach the later ones.
+
+Ordinary customers never see these links, and typing `/admin` just sends them back to their dashboard. Only a
+`super_admin` can change the platform settings under **Config**, and only a `super_admin` can reveal a BVN or ID
+number (every reveal is written to the audit log).
+
+If you don't see the Admin links after logging in, your account isn't an admin yet: see
+[Troubleshooting](#troubleshooting).
 
 ### As an admin
 - **Overview** — live platform stats: user counts, total wallet/reward/insurance liabilities,
@@ -646,7 +686,9 @@ The `finally` block restores `pg_hba.conf` even if something fails. Afterwards y
 - **Tier upgrades** — the queue of customers asking to move up a level. Each card shows the customer's
   photo, the tier change, their ID status, the BVN (last 4 digits only; a `super_admin` can reveal it, and
   that is audited) and, for Tier 3, the address and the proof-of-address photo (viewing is audited).
-  Approve or reject with a note the customer will see. Tier 2 can only be approved once their ID is verified.
+  Cards are marked **Direct jump** (Tier 1 straight to Tier 3) and **Edited after submission**, with the time and
+  number of edits, because customers can keep editing while you review. Approve or reject with a note the customer
+  will see. Verify the customer's ID under *Users & KYC* first: no upgrade can be approved until it is verified.
 - **Loans** — every loan with its borrower, amounts, due date and an **Overdue** flag.
 - **Partners** — manage the logos that scroll across the landing page: add a company (name, optional
   website, logo), choose the order, hide or show it, replace its logo, or delete it. See
@@ -671,11 +713,27 @@ figures differ between sources and change over time, so confirm the ones that ap
 |---|---|---|---|
 | Tier 1 | ₦50,000 | ₦300,000 | Automatic at sign-up |
 | Tier 2 | ₦200,000 | ₦500,000 | Verified ID + profile photo + BVN, approved by an admin |
-| Tier 3 | ₦5,000,000 | No limit | Tier 2 + residential address + a photo of a utility bill or similar, approved by an admin |
+| Tier 3 | ₦5,000,000 | No limit | Everything Tier 2 needs + residential address + a photo of a utility bill or similar, approved by an admin. **Available straight from Tier 1.** |
 
 Limits are enforced on deposits, transfers, bank transfers and withdrawals, after the customer's wallet is
 locked, so two simultaneous requests cannot both squeeze under the same limit. The BVN is stored encrypted
 like ID numbers. Proof of address must be a **photo** (PDFs are refused on purpose).
+
+**Verification documents.** A customer has at most one *open request* at a time, and it moves through three
+states: a private **draft** (nobody else can see it, and each item is saved as it is entered), **under review**
+(submitted, visible to admins) and then **approved** or **rejected**.
+
+- **Everything is editable.** Each item can be changed or replaced before submitting *and* while it is under
+  review. Edits made after submitting are counted and flagged to the reviewer, and a request under review must
+  stay complete: items can be replaced but not removed. They can also withdraw the request, which deletes the
+  uploaded photo.
+- **Going straight to Tier 3.** A Tier 1 customer who supplies everything Tier 3 needs can be approved straight
+  to Tier 3. The ID must be verified by an admin before any upgrade is approved.
+- **Fixing a rejection.** A new draft starts with what the customer already provided (the BVN, address and a
+  copy of the photo), so only the rejected item needs correcting. A rejected or missing **ID number** can be
+  corrected from the same page (a verified ID can only be changed through support).
+- **Privacy.** The BVN is encrypted, the photo is private, and the audit trail records *which fields* changed,
+  never their values.
 
 **Bank transfers.** The customer types an account number; the app uses the CBN NUBAN check digit to suggest
 the banks it could belong to (usually two to four), they pick one, and the name on the account is fetched and
@@ -853,7 +911,7 @@ python -m pytest tests/ -q
 
 This runs the tests that need no database (64). The database tests are skipped until you point them at an
 **empty test database**; they create the tables themselves (full instructions under
-[Run the tests](#run-the-tests)). With one, the whole suite runs (107 tests).
+[Run the tests](#run-the-tests)). With one, the whole suite runs (110 tests).
 
 Included unit tests cover the fee-split economics (`test_rewards.py`) and core security primitives
 (password/PIN hashing, OTP hashing, JWT round-tripping in `test_security.py`).
@@ -880,7 +938,12 @@ deposits and transfers (the books must still reconcile, no wallet can be overdra
 limit), tier limits and balance caps, the bank list, check-digit suggestions, name lookup and retry-safe
 transfers, the Paystack provider (with simulated HTTP), profile-photo validation (including hostile files and
 a decompression bomb), the full Tier 1 to 3 journey with encrypted BVN and audited reveals, and the loan
-lifecycle with repayment order, overdue detection and races. `tests/test_partners_integration.py` covers the partner strip: who may manage partners, what the public sees (hidden
+lifecycle with repayment order, overdue detection and races. `tests/test_documents_integration.py` covers the verification documents: saving a draft in pieces and editing or
+replacing each item, going straight from Tier 1 to Tier 3, editing under review (counted and flagged to the
+reviewer, but never allowed to remove items), withdrawing, re-using documents after a rejection, one BVN per
+customer, correcting a rejected or missing ID, drafts being invisible to admins, and no BVN, address or ID number
+ever reaching the audit trail.
+`tests/test_partners_integration.py` covers the partner strip: who may manage partners, what the public sees (hidden
 partners and their logos stay private), transparency being preserved, hostile uploads (including an SVG with a
 script in it), and that replaced or deleted logos leave no file behind. `tests/test_nuban.py` checks the account-number
 check digit against the CBN's published examples.

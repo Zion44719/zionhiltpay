@@ -391,6 +391,8 @@ def _tier_request_view(r: TierRequest, u: User) -> dict:
     return {
         "id": str(r.id), "target_tier": r.target_tier, "status": r.status, "created_at": r.created_at,
         "reviewed_at": r.reviewed_at, "review_note": r.review_note, "bvn_last4": r.bvn_last4, "address": r.address,
+        "submitted_at": r.submitted_at or r.created_at, "updated_at": r.updated_at, "edit_count": r.edit_count,
+        "edited_after_submit": (r.edit_count or 0) > 0,
         "has_document": bool(r.document_file),
         "user": {"id": str(u.id), "full_name": u.full_name, "username": u.username, "account_number": u.account_number,
                  "current_tier": u.account_tier, "kyc_status": u.kyc_status, "has_photo": u.has_photo},
@@ -400,7 +402,9 @@ def _tier_request_view(r: TierRequest, u: User) -> dict:
 @router.get("/tier-requests")
 async def list_tier_requests(status_filter: str | None = Query("pending", alias="status"), db: AsyncSession = Depends(get_db),
                              admin: User = Depends(get_current_admin)):
-    stmt = select(TierRequest, User).join(User, User.id == TierRequest.user_id).order_by(TierRequest.created_at.desc()).limit(200)
+    stmt = (select(TierRequest, User).join(User, User.id == TierRequest.user_id)
+            .where(TierRequest.status != "draft")                       # drafts are the customer's private work in progress
+            .order_by(TierRequest.created_at.desc()).limit(200))
     if status_filter:
         stmt = stmt.where(TierRequest.status == status_filter)
     return [_tier_request_view(r, u) for r, u in (await db.execute(stmt)).all()]
@@ -418,10 +422,10 @@ async def decide_tier_request(request_id: uuid.UUID, request: Request, payload: 
     if user.id == admin.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You cannot review your own upgrade request")
     if payload.decision == "approve":
-        if row.target_tier == 2 and user.kyc_status != "verified":
+        if user.kyc_status != "verified":
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Verify this customer's ID first (Users & KYC)")
-        if row.target_tier != user.account_tier + 1:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The customer's tier changed since this request was made")
+        if row.target_tier <= user.account_tier:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "The customer is already on this tier or higher")
         user.account_tier = row.target_tier
         row.status = "approved"
     else:

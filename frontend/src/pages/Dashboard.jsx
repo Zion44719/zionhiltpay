@@ -36,6 +36,7 @@ export default function Dashboard() {
   }, [])
 
   const accountNumber = balance?.account_number || profile?.account_number
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
   const kyc = profile?.kyc_status
 
   return (
@@ -51,6 +52,16 @@ export default function Dashboard() {
       </div>
 
       <Alert type="error">{error}</Alert>
+
+      {isAdmin && (
+        <Link to="/admin" className="zp-card p-4 mb-4 flex items-center justify-between gap-3 border-gold-500/40 hover:border-gold-500 transition-colors" aria-label="Open the admin dashboard">
+          <div className="min-w-0">
+            <p className="text-white font-medium">Admin portal</p>
+            <p className="text-xs text-slate-400">You're signed in as {profile.role === 'super_admin' ? 'a super admin' : 'an admin'}. Review IDs, upgrades, loans and more.</p>
+          </div>
+          <span className="zp-btn-primary !px-4 !py-2 text-sm whitespace-nowrap shrink-0">Open</span>
+        </Link>
+      )}
 
       {accountNumber && (
         <section className="zp-card p-4 sm:p-5 mb-4 flex items-center justify-between gap-3" aria-label="Your account number">

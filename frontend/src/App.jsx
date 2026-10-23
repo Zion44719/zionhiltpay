@@ -17,6 +17,7 @@ import Devices from './pages/Devices.jsx'
 import Settings from './pages/Settings.jsx'
 import Profile from './pages/Profile.jsx'
 import AccountLevel from './pages/AccountLevel.jsx'
+import Documents from './pages/Documents.jsx'
 import Loans from './pages/Loans.jsx'
 import SendToBank from './pages/SendToBank.jsx'
 import Assistant from './pages/Assistant.jsx'
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="/devices" element={<ProtectedRoute><Devices /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="/settings/level" element={<ProtectedRoute><AccountLevel /></ProtectedRoute>} />
+          <Route path="/settings/documents" element={<ProtectedRoute><Documents /></ProtectedRoute>} />
           <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
           <Route path="/loans" element={<ProtectedRoute><Loans /></ProtectedRoute>} />
           <Route path="/send-to-bank" element={<ProtectedRoute><SendToBank /></ProtectedRoute>} />

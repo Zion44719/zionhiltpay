@@ -37,12 +37,16 @@ export const profileApi = {
   get: () => api.get('/api/profile'),
   uploadPhoto: (file) => { const f = new FormData(); f.append('file', file); return api.post('/api/profile/photo', f, MULTIPART) },
   deletePhoto: () => api.delete('/api/profile/photo'),
+  updateIdentity: (payload) => api.put('/api/profile/identity', payload),
   photo: () => api.get('/api/profile/photo', { responseType: 'blob' }),
 }
 
 export const tierApi = {
   overview: () => api.get('/api/tier'),
-  upgrade: (formData) => api.post('/api/tier/upgrade', formData, MULTIPART),
+  saveDocs: (formData) => api.put('/api/tier/documents', formData, MULTIPART),   // creates/edits the draft or the request under review
+  submit: () => api.post('/api/tier/submit'),
+  withdraw: () => api.delete('/api/tier/documents'),
+  docFile: () => api.get('/api/tier/documents/file', { responseType: 'blob' }),
 }
 
 export const bankApi = {

@@ -79,11 +79,14 @@ export default function AdminTier() {
                   <div className="flex flex-wrap items-center gap-2 mt-2">
                     <span className="zp-pill text-gold-400 border-gold-500/40 bg-gold-500/10 whitespace-nowrap">Tier {r.user.current_tier} → {r.target_tier}</span>
                     <KycBadge status={r.user.kyc_status} />
+                    {r.edited_after_submit && <span className="zp-pill text-gold-400 border-gold-500/40 bg-gold-500/10 whitespace-nowrap">Edited after submission</span>}
+                    {r.target_tier - r.user.current_tier > 1 && <span className="zp-pill text-teal-300 border-teal-500/40 bg-teal-500/10 whitespace-nowrap">Direct jump</span>}
                   </div>
                 </div>
               </div>
               <dl className="mt-3 text-xs text-slate-400 space-y-1">
-                <div className="flex gap-2"><dt className="text-slate-500 w-20 shrink-0">Requested</dt><dd>{formatDate(r.created_at)}</dd></div>
+                <div className="flex gap-2"><dt className="text-slate-500 w-20 shrink-0">Submitted</dt><dd>{formatDate(r.submitted_at || r.created_at)}</dd></div>
+                {r.edited_after_submit && <div className="flex gap-2"><dt className="text-slate-500 w-20 shrink-0">Last edited</dt><dd>{formatDate(r.updated_at)} ({r.edit_count} edit{r.edit_count === 1 ? '' : 's'})</dd></div>}
                 {r.bvn_last4 && <div className="flex gap-2"><dt className="text-slate-500 w-20 shrink-0">BVN</dt><dd>•••••••{r.bvn_last4}</dd></div>}
                 {r.address && <div className="flex gap-2"><dt className="text-slate-500 w-20 shrink-0">Address</dt><dd className="break-words">{r.address}</dd></div>}
                 {r.review_note && <div className="flex gap-2"><dt className="text-slate-500 w-20 shrink-0">Note</dt><dd className="break-words">{r.review_note}</dd></div>}
@@ -105,8 +108,8 @@ export default function AdminTier() {
 
       {dialog?.type === 'decide' && (
         <Modal title={`${dialog.decision === 'approve' ? 'Approve' : 'Reject'} Tier ${dialog.row.target_tier} for ${dialog.row.user.full_name}?`} onClose={close}>
-          {dialog.decision === 'approve' && dialog.row.target_tier === 2 && <p className="text-xs text-slate-400 mb-3">The customer's ID must already be verified (Users & KYC). Check the BVN against their records first.</p>}
-          {dialog.decision === 'approve' && dialog.row.target_tier === 3 && <p className="text-xs text-slate-400 mb-3">Open the document and confirm the name and address match, and that it is recent.</p>}
+          {dialog.decision === 'approve' && <p className="text-xs text-slate-400 mb-3">The customer's ID must already be verified (Users &amp; KYC). Check the BVN against their records first.</p>}
+          {dialog.decision === 'approve' && dialog.row.target_tier === 3 && <p className="text-xs text-slate-400 mb-3">Open the document and confirm the name and address match, and that it is recent.{dialog.row.user.current_tier === 1 ? ' This takes the customer straight from Tier 1 to Tier 3.' : ''}</p>}
           <input className="zp-input mb-4" value={note} onChange={(e) => setNote(e.target.value)} placeholder={dialog.decision === 'reject' ? 'Reason (shown to the customer)' : 'Note (optional)'} />
           <div className="flex gap-3">
             <button onClick={close} className="zp-btn-secondary flex-1 min-h-[44px]">Cancel</button>

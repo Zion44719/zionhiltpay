@@ -132,6 +132,16 @@ def save_file(kind: str, data: bytes, ext: str = "jpg") -> str:
     return name
 
 
+def copy_file(kind: str, name) -> str | None:
+    """Duplicate a stored file under a new random name, so two records never share (and wrongly delete) one file."""
+    if not name or not NAME_RE.fullmatch(name):
+        return None
+    src = _dir(kind) / name
+    if not src.exists():
+        return None
+    return save_file(kind, src.read_bytes(), name.rsplit(".", 1)[1])
+
+
 def delete_file(kind: str, name) -> None:
     if name and NAME_RE.fullmatch(name):
         try:

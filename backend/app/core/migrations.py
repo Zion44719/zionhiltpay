@@ -51,6 +51,7 @@ TABLE_INDEXES = {
     ],
     "tier_requests": [
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_tier_requests_one_pending ON tier_requests (user_id) WHERE status = 'pending'",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_tier_requests_one_open ON tier_requests (user_id) WHERE status IN ('draft','pending')",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_tier_requests_bvn ON tier_requests (bvn_hash) WHERE status IN ('pending','approved') AND bvn_hash IS NOT NULL",
     ],
     "loans": [
@@ -59,6 +60,15 @@ TABLE_INDEXES = {
     "transactions": [
         # makes a payout safe to retry: the same client_reference from the same user can only exist once
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_txn_client_reference ON transactions (initiator_user_id, ((metadata ->> 'client_reference'))) WHERE (metadata ->> 'client_reference') IS NOT NULL",
+    ],
+}
+
+# columns added to tables that older databases already have (fresh databases get them from the model)
+TABLE_COLUMNS = {
+    "tier_requests": [
+        "updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+        "submitted_at TIMESTAMPTZ",
+        "edit_count SMALLINT NOT NULL DEFAULT 0",
     ],
 }
 
@@ -92,6 +102,14 @@ async def upgrade_schema(conn: AsyncConnection) -> int:
         await conn.execute(text(
             f"DO $$ BEGIN IF to_regtype('{typ}') IS NOT NULL THEN ALTER TYPE {typ} ADD VALUE IF NOT EXISTS '{val}'; END IF; END $$"
         ))
+
+    for table, cols in TABLE_COLUMNS.items():
+        if await _table_exists(conn, table):
+            for col in cols:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col}"))
+    if await _table_exists(conn, "tier_requests"):
+        # requests made before drafts existed were submitted when created
+        await conn.execute(text("UPDATE tier_requests SET submitted_at = created_at WHERE submitted_at IS NULL AND status <> 'draft'"))
 
     for table, statements in TABLE_INDEXES.items():
         if not await _table_exists(conn, table):

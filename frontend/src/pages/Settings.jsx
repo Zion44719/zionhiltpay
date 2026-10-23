@@ -1,5 +1,6 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { tierApi } from '../services/endpoints'
 import { useAuth } from '../context/AuthContext.jsx'
 import { Avatar, Icon, KycBadge } from '../components/UI.jsx'
 import { formatAccountNumber } from '../utils/format'
@@ -21,6 +22,10 @@ function Group({ children }) {
 
 export default function Settings() {
   const { profile } = useAuth()
+  const [req, setReq] = useState(null)
+  useEffect(() => { tierApi.overview().then(({ data }) => setReq(data.request)).catch(() => {}) }, [])
+  const isAdmin = profile?.role === 'admin' || profile?.role === 'super_admin'
+  const docHint = req?.status === 'pending' ? 'Under review' : req?.status === 'draft' ? 'Draft' : undefined
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
       <h1 className="font-display text-2xl sm:text-3xl text-white mb-5">Settings</h1>
@@ -38,9 +43,16 @@ export default function Settings() {
         <span className="text-slate-500"><Icon name="chevron" size={16} /></span>
       </Link>
 
+      {isAdmin && (
+        <Group>
+          <Row to="/admin" icon="level" label="Admin dashboard" hint={profile.role === 'super_admin' ? 'Super admin' : 'Admin'} />
+        </Group>
+      )}
+
       <Group>
         <Row to="/profile" icon="user" label="My profile" hint={profile?.has_photo ? undefined : 'Add a photo'} />
         <Row to="/settings/level" icon="level" label="Account level & limits" hint={`Tier ${profile?.account_tier ?? 1}`} />
+        <Row to="/settings/documents" icon="history" label="Verification documents" hint={docHint} />
         <Row to="/loans" icon="loan" label="Loans" />
       </Group>
 
