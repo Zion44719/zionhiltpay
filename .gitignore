@@ -26,3 +26,4 @@ npm-debug.log*
 .idea/
 *.log
 node_modules/
+node_modules
